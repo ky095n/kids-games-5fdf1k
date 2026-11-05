@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Tablet check</title>
+<!--
+  Diagnostic page for the kids games. Written in old-style JavaScript (ES5: var, function,
+  XMLHttpRequest) on purpose, so it still runs on the old browsers it is meant to diagnose.
+  It reports the browser, a few feature checks, and whether this browser can read each game's code.
+-->
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #fef9f0; color: #333; margin: 0; padding: 16px; }
+  h1 { font-size: 24px; margin: 0 0 12px; color: #ff7b54; }
+  .box { background: #fff; border-radius: 14px; padding: 12px 14px; margin: 0 0 12px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .row { padding: 6px 0; border-bottom: 1px solid #eee; font-size: 17px; }
+  .row:last-child { border-bottom: 0; }
+  .ok { color: #1e8449; font-weight: bold; }
+  .bad { color: #c0392b; font-weight: bold; }
+  .warn { color: #b9770e; font-weight: bold; }
+  .big { font-size: 22px; font-weight: bold; padding: 14px; border-radius: 14px; color: #fff; margin: 0 0 12px; }
+  .small { font-size: 13px; color: #666; word-break: break-all; }
+  a { color: #ff7b54; }
+</style>
+</head>
+<body>
+<h1>Tablet check</h1>
+<noscript><div class="big" style="background:#c0392b">JavaScript is OFF in this viewer, so the games cannot run here. Open the link in Chrome instead.</div></noscript>
+<div id="verdict" class="big" style="background:#888">Checking&hellip;</div>
+<div class="box" id="about"></div>
+<div class="box" id="features"></div>
+<div class="box" id="games"></div>
+<p class="small">Please take a photo or screenshot of this whole page and send it to John. <a href="./">Back to the games</a></p>
+
+<script>
+(function () {
+  var ua = navigator.userAgent || "";
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function row(label, value, cls) { return '<div class="row">' + esc(label) + ': <span class="' + (cls || "") + '">' + esc(value) + "</span></div>"; }
+  function match(re) { var m = ua.match(re); return m ? m[1] : null; }
+
+  // ---- about this tablet ----
+  var android = match(/Android ([0-9.]+)/);
+  var chrome = match(/Chrome\/([0-9.]+)/);
+  var browser = "Unknown browser";
+  if (/SamsungBrowser\/([0-9.]+)/.test(ua)) browser = "Samsung Internet " + match(/SamsungBrowser\/([0-9.]+)/);
+  else if (/Silk\/([0-9.]+)/.test(ua)) browser = "Amazon Silk " + match(/Silk\/([0-9.]+)/);
+  else if (/Firefox\/([0-9.]+)/.test(ua)) browser = "Firefox " + match(/Firefox\/([0-9.]+)/);
+  else if (/EdgA\/([0-9.]+)/.test(ua)) browser = "Edge " + match(/EdgA\/([0-9.]+)/);
+  else if (/OPR\/([0-9.]+)/.test(ua)) browser = "Opera " + match(/OPR\/([0-9.]+)/);
+  else if (chrome) browser = "Chrome " + chrome;
+  else if (/Version\/([0-9.]+).*Safari/.test(ua)) browser = "Safari " + match(/Version\/([0-9.]+)/);
+  var inApp = /; wv\)|FBAN|FBAV|FB_IAB|Instagram|Messenger|Line\/|GSA\//.test(ua);
+  var kindle = /Kindle|KF[A-Z]{2,4}|Silk/.test(ua);
+  var chromeMajor = chrome ? parseInt(chrome, 10) : null;
+
+  var about = "";
+  about += row("Android version", android || "not Android (or not reported)");
+  about += row("Browser", browser);
+  if (chrome) about += row("Chrome engine version", chrome, chromeMajor >= 61 ? "ok" : "bad");
+  about += row("Screen", screen.width + " x " + screen.height + " (window " + window.innerWidth + " x " + window.innerHeight + ")");
+  about += row("Opened inside another app", inApp ? "YES - it may be an app's built-in viewer" : "no", inApp ? "warn" : "ok");
+  if (kindle) about += row("Amazon Fire tablet", "yes - if it is in Amazon Kids mode, websites may be blocked", "warn");
+  about += row("Online", navigator.onLine === false ? "no" : "yes");
+  about += '<div class="row small">' + esc(ua) + "</div>";
+  document.getElementById("about").innerHTML = about;
+
+  // ---- features the games use ----
+  function canCompile(src) { try { new Function(src); return null; } catch (e) { return (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : e); } }
+  var feats = [];
+  function feat(name, ok) { feats.push(row(name, ok ? "yes" : "NO", ok ? "ok" : "bad")); return ok; }
+  var modernJs = feat("Modern JavaScript (let, const, arrow functions)", canCompile("let a = 1; const b = () => a; return b();") === null);
+  feat("Template text and classes", canCompile("class A {}; return `x${1}`;") === null);
+  var canvas = document.createElement("canvas");
+  feat("Drawing (canvas)", !!(canvas.getContext && canvas.getContext("2d")));
+  feat("Touch / pointer input", !!(window.PointerEvent || ("ontouchstart" in window)));
+  feat("Sound (Web Audio)", !!(window.AudioContext || window.webkitAudioContext));
+  feat("Speech", !!window.speechSynthesis);
+  feat("Offline copy (service worker)", "serviceWorker" in navigator);
+  var flexGap = !!(window.CSS && CSS.supports && CSS.supports("gap", "1px"));
+  feat("Modern layout (flex gap)", flexGap);
+  document.getElementById("features").innerHTML = feats.join("");
+
+  // ---- can this browser read each game's code? ----
+  var games = [["maze_game.html", "Maze Adventure"], ["word_game.html", "Word Builder"], ["car_game.html", "Fix the Car"], ["bunny_zombie_game.html", "Bunny & Zombie"]];
+  var results = [], done = 0, bad = 0, gamesEl = document.getElementById("games");
+  gamesEl.innerHTML = '<div class="row">Checking the games&hellip;</div>';
+  window.__checkGameCode = function (html) {  // exposed for testing
+    var scripts = html.match(/<script>([\s\S]*?)<\/script>/g) || [];
+    for (var i = 0; i < scripts.length; i++) {
+      var src = scripts[i].replace(/^<script>/, "").replace(/<\/script>$/, "");
+      var err = canCompile(src);
+      if (err) return err;
+    }
+    return null;
+  };
+  function finish() {
+    var v = document.getElementById("verdict");
+    gamesEl.innerHTML = results.join("");
+    if (bad === 0 && modernJs) { v.style.background = "#1e8449"; v.innerHTML = "This browser can run the games."; }
+    else { v.style.background = "#c0392b"; v.innerHTML = "This browser cannot run the games" + (chrome && chromeMajor < 61 ? " (its browser is too old)" : "") + "."; }
+  }
+  for (var g = 0; g < games.length; g++) {
+    (function (file, name) {
+      var x = new XMLHttpRequest();
+      x.open("GET", file + "?check=" + new Date().getTime(), true);
+      x.onreadystatechange = function () {
+        if (x.readyState !== 4) return;
+        var line;
+        if (x.status !== 200) { bad++; line = row(name, "could not load the game (status " + x.status + ")", "bad"); }
+        else {
+          var err = window.__checkGameCode(x.responseText);
+          if (err) { bad++; line = row(name, "CANNOT RUN - " + err, "bad"); }
+          else line = row(name, "can run", "ok");
+        }
+        results.push(line);
+        if (++done === games.length) finish();
+      };
+      x.send();
+    })(games[g][0], games[g][1]);
+  }
+})();
+</script>
+</body>
+</html>
