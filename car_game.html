@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kids Games">
+<meta name="theme-color" content="#ff7b54">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Car Fix It!</title>
+<style>
+  :root {
+    --bg1: #fef9f0;
+    --bg2: #fdf2e3;
+    --card: #ffffff;
+    --accent: #ff7b54;
+    --accent2: #4ecdc4;
+    --good: #7bc043;
+    --bad: #e74c3c;
+    --text: #3a3a3a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; touch-action: manipulation; }
+  body {
+    font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Segoe UI", sans-serif;
+    background: linear-gradient(160deg, var(--bg1), var(--bg2));
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ---- Top bar ---- */
+  #topbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.5);
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-weight: bold;
+    font-size: clamp(13px, 3.5vw, 17px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    white-space: nowrap;
+  }
+  #topbar .spacer { flex: 1; }
+  #sound-toggle {
+    background: var(--accent2);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  /* ---- Main stage ---- */
+  #stage {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  /* ---- Car canvas ---- */
+  #car-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 520px;
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas#car {
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    display: block;
+    border-radius: 16px;
+  }
+
+  /* ---- Problem label ---- */
+  #problem-label {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 8px 18px;
+    font-size: clamp(16px, 4.5vw, 24px);
+    font-weight: bold;
+    color: var(--accent);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.10);
+    text-align: center;
+    max-width: 95%;
+  }
+
+  /* ---- Options grid ---- */
+  #options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+    max-width: 520px;
+    padding: 0 8px;
+  }
+  .opt-btn {
+    background: var(--card);
+    border: 4px solid var(--accent);
+    border-radius: 16px;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.10);
+    transition: transform .12s, box-shadow .12s, border-color .15s, background .15s;
+    font-family: inherit;
+    font-size: clamp(13px, 3.5vw, 18px);
+    font-weight: bold;
+    color: var(--text);
+  }
+  .opt-btn:hover { transform: translateY(-3px); box-shadow: 0 7px 14px rgba(0,0,0,0.16); }
+  .opt-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0,0,0,0.12); }
+  .opt-btn .opt-emoji { font-size: clamp(36px, 10vw, 64px); line-height: 1.1; }
+  .opt-btn.correct { border-color: var(--good); background: #f0faf0; }
+  .opt-btn.wrong { border-color: var(--bad); background: #fdf0f0; animation: shake .4s ease; }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25% { transform: translateX(-8px); }
+    75% { transform: translateX(8px); }
+  }
+
+  /* ---- Win overlay ---- */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(255,255,255,0.88);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    z-index: 50;
+  }
+  #overlay.show { display: flex; }
+  #overlay .big { font-size: clamp(40px, 12vw, 80px); }
+  #overlay .msg { font-size: clamp(22px, 7vw, 40px); font-weight: bold; color: var(--accent); }
+  #overlay .sub { font-size: clamp(15px, 4.5vw, 22px); color: #666; }
+
+  .confetti-piece {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    top: -20px;
+    z-index: 60;
+    pointer-events: none;
+    animation: fall linear forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(110vh) rotate(720deg); }
+  }
+
+  /* Phone held sideways: put the car and problem on the left, options on the right */
+  @media (orientation: landscape) and (max-height: 500px) {
+    #stage {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: 1fr auto;
+      grid-template-areas: "car opts" "label opts";
+      align-items: center;
+      justify-items: center;
+      gap: 6px;
+    }
+    #car-wrap { grid-area: car; align-self: center; justify-self: center; max-width: 55vw; }
+    #problem-label { grid-area: label; justify-self: center; max-width: 55vw; }
+    #options {
+      grid-area: opts;
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr 1fr;
+      width: auto;
+      max-width: 30vw;
+      gap: 6px;
+      align-self: center;
+      justify-self: center;
+    }
+    .opt-btn {
+      flex-direction: row;
+      padding: 6px 10px;
+      gap: 6px;
+    }
+    .opt-btn .opt-emoji { font-size: clamp(28px, 6vw, 44px); }
+  }
+
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="stat" id="fixed-count">Fixed: 0</span>
+  <span class="spacer"></span>
+  <span class="stat" id="sound-toggle">🔊 Sound</span>
+</div>
+
+<div id="stage">
+  <div id="car-wrap">
+    <canvas id="car"></canvas>
+  </div>
+  <div id="problem-label"></div>
+  <div id="options"></div>
+</div>
+
+<div id="overlay">
+  <div class="big">🎉</div>
+  <div class="msg">Great Job, Lucas!</div>
+  <div class="sub" id="overlay-sub">Car fixed!</div>
+  <button class="primary" id="next-btn" style="font-family:inherit;font-weight:bold;font-size:clamp(18px,5vw,26px);border:none;border-radius:14px;padding:12px 28px;background:var(--accent);color:#fff;cursor:pointer;box-shadow:0 3px 0 rgba(0,0,0,0.12);">Next Car →</button>
+</div>
+
+<script>
+"use strict";
+
+// ===================== Config =====================
+const PLAYER_NAME = "Lucas";
+
+// ===================== Sound =====================
+let audioCtx = null;
+function beep(freq, dur, vol) {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.value = vol;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+
+let soundOn = true;
+document.getElementById("sound-toggle").addEventListener("click", function() {
+  soundOn = !soundOn;
+  this.textContent = soundOn ? "🔊 Sound" : "🔇 Muted";
+  if (!soundOn && "speechSynthesis" in window) window.speechSynthesis.cancel();
+});
+
+// ===================== Speech =====================
+function speak(text) {
+  if (!soundOn) return null;
+  try {
+    if ("speechSynthesis" in window) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.85;
+      u.pitch = 1.1;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+      return u;
+    }
+  } catch (e) {}
+  return null;
+}
+
+// ===================== Confetti =====================
+function confetti() {
+  const colors = ["#ff7b54", "#4ecdc4", "#7bc043", "#ffd166", "#ef476f", "#118ab2"];
+  for (let i = 0; i < 60; i++) {
+    const el = document.createElement("div");
+    el.className = "confetti-piece";
+    el.style.left = Math.random()*100 + "vw";
+    el.style.background = colors[Math.floor(Math.random()*colors.length)];
+    el.style.animationDuration = (1.5 + Math.random()*1.5) + "s";
+    el.style.animationDelay = Math.random()*0.5 + "s";
+    el.style.borderRadius = Math.random() > 0.5 ? "50%" : "2px";
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+}
+
+// ===================== Car drawing =====================
+const canvas = document.getElementById("car");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  const wrap = document.getElementById("car-wrap");
+  const rect = wrap.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const dpr = window.devicePixelRatio || 1;
+  // Canvas is wider than tall (car is horizontal)
+  const W = Math.min(rect.width, 520);
+  const H = W * 0.55;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawCar();
+}
+
+function drawCar() {
+  const W = canvas.width / (window.devicePixelRatio || 1);
+  const H = canvas.height / (window.devicePixelRatio || 1);
+  if (!W || !H) return;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Ground
+  ctx.fillStyle = "#e8e0d0";
+  ctx.fillRect(0, H * 0.85, W, H * 0.15);
+  ctx.fillStyle = "#c8b898";
+  ctx.fillRect(0, H * 0.85, W, 3);
+
+  const cx = W / 2;
+  const cy = H * 0.55;
+  const carW = W * 0.72;
+  const carH = H * 0.38;
+  const bodyY = cy - carH / 2;
+
+  // Shadow
+  ctx.fillStyle = "rgba(0,0,0,0.10)";
+  ctx.beginPath();
+  ctx.ellipse(cx, H * 0.85, carW * 0.52, H * 0.05, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Car body (rounded rectangle)
+  ctx.fillStyle = "#ff7b54";
+  ctx.strokeStyle = "#e05a3a";
+  ctx.lineWidth = 3;
+  roundRect(ctx, cx - carW/2, bodyY, carW, carH, 14);
+  ctx.fill();
+  ctx.stroke();
+
+  // Cabin (roof)
+  const roofW = carW * 0.52;
+  const roofH = carH * 0.55;
+  const roofX = cx - roofW/2 + carW * 0.05;
+  const roofY = bodyY - roofH + 4;
+  ctx.fillStyle = "#4ecdc4";
+  ctx.strokeStyle = "#3ab0a8";
+  roundRect(ctx, roofX, roofY, roofW, roofH + 8, 10);
+  ctx.fill();
+  ctx.stroke();
+
+  // Windows
+  ctx.fillStyle = "#d4f1f0";
+  const winW = roofW * 0.38;
+  const winH = roofH * 0.7;
+  const winY = roofY + roofH * 0.12;
+  roundRect(ctx, roofX + roofW * 0.08, winY, winW, winH, 5);
+  ctx.fill();
+  roundRect(ctx, roofX + roofW * 0.52, winY, winW, winH, 5);
+  ctx.fill();
+
+  // Headlights
+  ctx.fillStyle = "#ffd166";
+  ctx.beginPath();
+  ctx.arc(cx + carW/2 - 8, bodyY + carH * 0.55, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ff6b6b";
+  ctx.beginPath();
+  ctx.arc(cx - carW/2 + 8, bodyY + carH * 0.55, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Wheels
+  const wheelR = carH * 0.32;
+  const wheelY = bodyY + carH - wheelR * 0.3;
+  const frontWheelX = cx + carW * 0.30;
+  const rearWheelX = cx - carW * 0.30;
+
+  drawWheel(frontWheelX, wheelY, wheelR, "front");
+  drawWheel(rearWheelX, wheelY, wheelR, "rear");
+
+  // Problem indicator
+  if (currentProblem && !fixed) {
+    const pos = PROBLEM_POSITIONS[currentProblem.part];
+    if (pos) {
+      const px = cx + pos.x * carW;
+      const py = bodyY + pos.y * carH;
+      // Pulsing red circle
+      ctx.strokeStyle = "#e74c3c";
+      ctx.lineWidth = 4;
+      ctx.setLineDash([8, 5]);
+      ctx.beginPath();
+      ctx.arc(px, py, wheelR * 0.7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Exclamation
+      ctx.fillStyle = "#e74c3c";
+      ctx.font = "bold " + Math.round(wheelR * 0.9) + "px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("!", px, py);
+    }
+  }
+
+  // Fixed: green checkmark
+  if (fixed) {
+    ctx.fillStyle = "#7bc043";
+    ctx.font = "bold " + Math.round(H * 0.18) + "px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("✓", cx + carW * 0.42, bodyY + carH * 0.35);
+  }
+}
+
+function drawWheel(x, y, r, which) {
+  const part = which === "front" ? "front_wheel" : "rear_wheel";
+  const isBroken = currentProblem && currentProblem.part === part && !fixed;
+
+  // Tire
+  ctx.fillStyle = isBroken ? "#999" : "#333";
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hub
+  ctx.fillStyle = isBroken ? "#bbb" : "#ccc";
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hub center
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Flat tire: squashed look
+  if (isBroken) {
+    ctx.fillStyle = "rgba(0,0,0,0.15)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + r * 0.7, r * 0.9, r * 0.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ===================== Problems =====================
+// Positions are relative to car center, in carW/carH units
+const PROBLEM_POSITIONS = {
+  front_wheel: { x: 0.30, y: 0.85 },
+  rear_wheel:  { x: -0.30, y: 0.85 },
+  headlight:   { x: 0.46, y: 0.55 },
+  taillight:   { x: -0.46, y: 0.55 },
+  windshield:  { x: 0.05, y: -0.15 },
+  door:        { x: -0.10, y: 0.30 },
+};
+
+const PROBLEMS = [
+  {
+    part: "front_wheel",
+    label: "The front tire is flat!",
+    correct: { emoji: "🛞", label: "New tire" },
+    wrong: [
+      { emoji: "🔋", label: "Battery" },
+      { emoji: "🔧", label: "Wrench" },
+      { emoji: "🪣", label: "Water" },
+    ],
+    praise: "You fixed the tire!",
+  },
+  {
+    part: "rear_wheel",
+    label: "The back tire is flat!",
+    correct: { emoji: "🛞", label: "New tire" },
+    wrong: [
+      { emoji: "🔋", label: "Battery" },
+      { emoji: "🪣", label: "Water" },
+      { emoji: "🧽", label: "Sponge" },
+    ],
+    praise: "You fixed the tire!",
+  },
+  {
+    part: "headlight",
+    label: "The headlight is broken!",
+    correct: { emoji: "💡", label: "New light" },
+    wrong: [
+      { emoji: "🔋", label: "Battery" },
+      { emoji: "🛞", label: "Tire" },
+      { emoji: "🪣", label: "Water" },
+    ],
+    praise: "You fixed the light!",
+  },
+  {
+    part: "taillight",
+    label: "The taillight is broken!",
+    correct: { emoji: "💡", label: "New light" },
+    wrong: [
+      { emoji: "🔋", label: "Battery" },
+      { emoji: "🛞", label: "Tire" },
+      { emoji: "🧽", label: "Sponge" },
+    ],
+    praise: "You fixed the light!",
+  },
+  {
+    part: "windshield",
+    label: "The windshield is cracked!",
+    correct: { emoji: "🪟", label: "New glass" },
+    wrong: [
+      { emoji: "🔋", label: "Battery" },
+      { emoji: "🛞", label: "Tire" },
+      { emoji: "🪣", label: "Water" },
+    ],
+    praise: "You fixed the window!",
+  },
+  {
+    part: "door",
+    label: "The door won't close!",
+    correct: { emoji: "🚪", label: "New door" },
+    wrong: [
+      { emoji: "🔋", label: "Battery" },
+      { emoji: "🛞", label: "Tire" },
+      { emoji: "💡", label: "Light" },
+    ],
+    praise: "You fixed the door!",
+  },
+];
+
+// ===================== Game state =====================
+let currentProblem = null;
+let fixed = false;
+let fixedCount = 0;
+let options = [];
+let optionBtns = [];
+let advanceTimer = null;
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function nextProblem() {
+  clearTimeout(advanceTimer);
+  fixed = false;
+  // Pick a random problem
+  currentProblem = PROBLEMS[Math.floor(Math.random() * PROBLEMS.length)];
+
+  // Build options: correct + 3 wrong, shuffled
+  options = shuffle([currentProblem.correct, ...currentProblem.wrong]);
+
+  // Update UI
+  document.getElementById("problem-label").textContent = currentProblem.label;
+  document.getElementById("fixed-count").textContent = "Fixed: " + fixedCount;
+
+  const optEl = document.getElementById("options");
+  optEl.innerHTML = "";
+  optionBtns = [];
+  options.forEach((opt, i) => {
+    const btn = document.createElement("button");
+    btn.className = "opt-btn";
+    btn.innerHTML = '<span class="opt-emoji">' + opt.emoji + '</span><span>' + opt.label + '</span>';
+    btn.addEventListener("click", () => pickOption(i));
+    optEl.appendChild(btn);
+    optionBtns.push(btn);
+  });
+
+  drawCar();
+  speak("Oh no! " + currentProblem.label + " What do we need to fix it, " + PLAYER_NAME + "?");
+}
+
+function pickOption(i) {
+  if (fixed) return;
+  const btn = optionBtns[i];
+  const opt = options[i];
+
+  if (opt === currentProblem.correct) {
+    fixed = true;
+    fixedCount++;
+    btn.classList.add("correct");
+    document.getElementById("fixed-count").textContent = "Fixed: " + fixedCount;
+    drawCar();
+
+    // Disable other buttons
+    optionBtns.forEach(b => { b.style.pointerEvents = "none"; });
+
+    // Celebrate
+    confetti();
+    if (soundOn) { beep(523, 0.12, 0.15); setTimeout(()=>beep(659,0.12,0.15),130); setTimeout(()=>beep(784,0.2,0.15),260); }
+    const speech = speak("Great job, " + PLAYER_NAME + "! " + currentProblem.praise + " You fixed the car!");
+
+    // Show overlay after speech or 3s
+    const FLOOR = 3000, CAP = 8000;
+    let advanced = false;
+    const doAdvance = () => {
+      if (advanced) return;
+      advanced = true;
+      clearTimeout(capTimer);
+      showOverlay();
+    };
+    const capTimer = setTimeout(doAdvance, CAP);
+    if (speech) {
+      speech.onend = doAdvance;
+      speech.onerror = doAdvance;
+    } else {
+      setTimeout(doAdvance, FLOOR);
+    }
+  } else {
+    // Wrong answer
+    btn.classList.add("wrong");
+    if (soundOn) beep(150, 0.08, 0.12);
+    speak("That's not it! Try again, " + PLAYER_NAME + ".");
+    setTimeout(() => btn.classList.remove("wrong"), 500);
+  }
+}
+
+function showOverlay() {
+  const overlay = document.getElementById("overlay");
+  document.getElementById("overlay-sub").textContent =
+    "You've fixed " + fixedCount + " car" + (fixedCount === 1 ? "" : "s") + "!";
+  overlay.classList.add("show");
+  // Auto-advance after 3s
+  advanceTimer = setTimeout(nextProblem, 3000);
+}
+
+document.getElementById("next-btn").addEventListener("click", nextProblem);
+
+// ===================== Init =====================
+function init() {
+  void document.body.offsetHeight;
+  resizeCanvas();
+  nextProblem();
+}
+window.addEventListener("resize", resizeCanvas);
+window.addEventListener("load", () => requestAnimationFrame(resizeCanvas));
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(init));
+} else {
+  requestAnimationFrame(init);
+}
+</script>
+<a id="home-link" href="./" aria-label="Back to games">🏠</a>
+<style>
+  #home-link { position: fixed; left: calc(10px + env(safe-area-inset-left)); bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 60; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.85);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;
+    font-size: 22px; text-decoration: none; }
+</style>
+<style>
+  #home-link { left: 50%; transform: translateX(-50%); bottom: auto; top: calc(4px + env(safe-area-inset-top)); width: 40px; height: 40px; }
+</style>
+<script>
+if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js"); }); }
+</script>
+</body>
+</html>

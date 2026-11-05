@@ -19,7 +19,8 @@ from PIL import Image, ImageDraw
 HERE = Path(__file__).resolve().parent
 SRC = HERE.parent / "outputs"
 GAMES = [("maze_game.html", "Maze Adventure", "🦌", "Help Sven find the star"),
-         ("word_game.html", "Word Builder", "🔤", "Spell the picture")]
+         ("word_game.html", "Word Builder", "🔤", "Spell the picture"),
+         ("car_game.html", "Fix the Car", "🚗", "Spot the problem, pick the part")]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--name", default=None, help='player name to show; "" hides it (default: keep the games\' own)')
@@ -31,6 +32,7 @@ HEAD_EXTRA = """<link rel="manifest" href="manifest.webmanifest">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Kids Games">
 <meta name="theme-color" content="#ff7b54">
+<meta name="robots" content="noindex, nofollow">
 """
 SW_REGISTER = """<script>
 if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js"); }); }
@@ -42,6 +44,13 @@ HOME_BUTTON = """<a id="home-link" href="./" aria-label="Back to games">🏠</a>
     z-index: 60; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.85);
     box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;
     font-size: 22px; text-decoration: none; }
+</style>
+"""
+# The car game's answer grid fills the bottom-left corner, so its Home button goes in the
+# empty middle of its top bar instead.
+HOME_AT_TOP = {"car_game.html"}
+HOME_TOP_STYLE = """<style>
+  #home-link { left: 50%; transform: translateX(-50%); bottom: auto; top: calc(4px + env(safe-area-inset-top)); width: 40px; height: 40px; }
 </style>
 """
 
@@ -62,7 +71,8 @@ def game_page(src_name: str) -> str:
     i = html.index("\n", html.index("<meta charset")) + 1
     html = html[:i] + HEAD_EXTRA + html[i:]
     j = html.rindex("</body>")
-    return html[:j] + HOME_BUTTON + SW_REGISTER + html[j:]
+    home = HOME_BUTTON + (HOME_TOP_STYLE if src_name in HOME_AT_TOP else "")
+    return html[:j] + home + SW_REGISTER + html[j:]
 
 
 def index_page() -> str:
