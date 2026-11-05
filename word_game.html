@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kids Games">
+<meta name="theme-color" content="#ff7b54">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Word Builder</title>
+<style>
+  :root {
+    --bg1: #fef9f0;
+    --bg2: #fdf2e3;
+    --card: #ffffff;
+    --accent: #ff7b54;
+    --accent2: #4ecdc4;
+    --good: #7bc043;
+    --text: #3a3a3a;
+    --slot-bg: #f0e6d6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; touch-action: manipulation; }
+  body {
+    font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Segoe UI", sans-serif;
+    background: linear-gradient(160deg, var(--bg1), var(--bg2));
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ---- Top bar: progress ---- */
+  #topbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.5);
+  }
+  #stars {
+    font-size: 26px;
+    letter-spacing: 3px;
+    min-width: 120px;
+  }
+  #star { opacity: 0.25; transition: opacity .3s, transform .3s; display:inline-block; }
+  #star.earned { opacity: 1; transform: scale(1.1); }
+  #progress-wrap {
+    flex: 1;
+    height: 18px;
+    background: rgba(0,0,0,0.08);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  #progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent2), var(--good));
+    border-radius: 10px;
+    transition: width .5s ease;
+  }
+
+  /* ---- Main stage ---- */
+  #stage {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 6px 12px 0;
+    gap: 8px;
+    overflow-y: auto;
+  }
+
+  #picture-card {
+    background: var(--card);
+    border-radius: 24px;
+    padding: 10px 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 200px;
+  }
+  #picture {
+    font-size: clamp(72px, 18vw, 150px);
+    line-height: 1.1;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.12));
+  }
+  #word-label {
+    font-size: clamp(15px, 4vw, 22px);
+    color: #888;
+    font-weight: bold;
+  }
+
+  /* ---- Slots (underscores) ---- */
+  #slots {
+    display: flex;
+    gap: min(10px, 2vw);
+    margin-top: 4px;
+    /* long words (7-8 letters) shrink their slots instead of running off screen */
+    width: 100%;
+    justify-content: center;
+    padding: 0 8px;
+  }
+  .slot {
+    flex: 0 1 auto;
+    min-width: 0;
+    width: clamp(52px, 14vw, 80px);
+    height: clamp(56px, 15vw, 84px);
+    background: var(--slot-bg);
+    border: 4px dashed #cbb89a;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(30px, 9vw, 52px);
+    font-weight: bold;
+    color: var(--accent);
+    transition: transform .15s, border-color .15s, background .15s;
+  }
+  .slot.filled {
+    border-style: solid;
+    border-color: var(--accent2);
+    background: #eafaf7;
+  }
+  .slot.hinted { animation: hintpulse 0.7s ease 2; }
+  @keyframes hintpulse {
+    0%,100% { transform: scale(1); }
+    50% { transform: scale(1.12); border-color: var(--accent); }
+  }
+  .slot.wrong { animation: shake .4s ease; }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25% { transform: translateX(-8px); }
+    75% { transform: translateX(8px); }
+  }
+
+  /* ---- Letter tiles ---- */
+  #letters {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 6px;
+    width: 100%;
+    max-width: 640px;
+  }
+  .tile {
+    width: clamp(48px, 12vw, 72px);
+    height: clamp(52px, 13vw, 76px);
+    background: var(--card);
+    border: 4px solid var(--accent);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(28px, 8vw, 46px);
+    font-weight: bold;
+    color: var(--text);
+    cursor: grab;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    transition: transform .12s, box-shadow .12s, opacity .2s;
+    touch-action: none;
+  }
+  .tile:hover { transform: translateY(-3px); box-shadow: 0 7px 14px rgba(0,0,0,0.18); }
+  .tile:active { cursor: grabbing; }
+  .tile.dragging { opacity: 0.4; }
+  .tile.used { opacity: 0.25; pointer-events: none; transform: scale(0.9); }
+  .tile.ghost {
+    position: fixed;
+    z-index: 999;
+    pointer-events: none;
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+
+  /* ---- Controls ---- */
+  #controls {
+    display: flex;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  button {
+    font-family: inherit;
+    font-size: clamp(16px, 4.5vw, 22px);
+    font-weight: bold;
+    padding: 12px 22px;
+    border: none;
+    border-radius: 18px;
+    cursor: pointer;
+    color: white;
+    box-shadow: 0 5px 0 rgba(0,0,0,0.15);
+    transition: transform .1s, box-shadow .1s;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,0.15); }
+  #hint-btn { background: var(--accent2); }
+  #clear-btn { background: #b0a48f; }
+
+  /* Phone held sideways: size by screen height so picture, slots, tiles and buttons
+     fit on one screen without scrolling. */
+  @media (orientation: landscape) and (max-height: 500px) {
+    #topbar { padding: 4px 16px; }
+    #stage { gap: 6px; padding-top: 4px; }
+    #picture-card { padding: 4px 16px; gap: 0; }
+    #picture { font-size: clamp(36px, 14vh, 150px); }
+    #word-label { font-size: clamp(13px, 4.5vh, 22px); }
+    .slot { height: clamp(40px, 14vh, 84px); width: clamp(40px, 13vh, 80px); font-size: clamp(24px, 9vh, 52px); }
+    #letters { gap: 8px; margin-top: 0; }
+    .tile { height: clamp(40px, 13vh, 76px); width: clamp(40px, 12vh, 72px); font-size: clamp(22px, 8vh, 46px); }
+    #controls { margin-top: 0; }
+    #controls button { padding: 6px 18px; }
+  }
+
+  /* ---- Celebration overlay ---- */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(255,255,255,0.9);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    z-index: 1000;
+  }
+  #overlay.show { display: flex; }
+  /* vmin (smaller screen side) so a sideways phone doesn't push these off screen */
+  #overlay h1 { font-size: clamp(32px, 12vmin, 80px); color: var(--good); }
+  #overlay .big-emoji { font-size: clamp(60px, 22vmin, 180px); animation: bounce .8s ease infinite alternate; }
+  @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-24px); } }
+  #next-btn { background: var(--accent); font-size: clamp(20px, 6vmin, 30px); padding: 16px 34px; }
+
+  /* confetti */
+  .confetti {
+    position: fixed;
+    top: -20px;
+    width: 12px;
+    height: 12px;
+    z-index: 1001;
+    animation: fall linear forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(110vh) rotate(720deg); opacity: 0.2; }
+  }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="stars"></div>
+    <div id="progress-wrap"><div id="progress-bar"></div></div>
+  </div>
+
+  <div id="stage">
+    <div id="picture-card">
+      <div id="picture"></div>
+      <div id="word-label"></div>
+    </div>
+    <div id="slots"></div>
+    <div id="letters"></div>
+    <div id="controls">
+      <button id="hint-btn">💡 Hint</button>
+      <button id="clear-btn">↺ Clear</button>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div class="big-emoji">🎉</div>
+    <h1>Great Job, Lucas!</h1>
+    <button id="next-btn">Next →</button>
+  </div>
+
+<script>
+"use strict";
+
+// ---- Word bank: each entry has a clipart-style emoji and the word ----
+const WORDS = [
+  { word: "zombie",  emoji: "🧟" },
+  { word: "grandpa",  emoji: "👴" },
+  { word: "mommy",  emoji: "👩" },
+  { word: "daddy",  emoji: "👨" },
+  { word: "sven",  emoji: "🦌" },
+  { word: "unicorns",  emoji: "🦄" },
+  { word: "cat",  emoji: "🐱" },
+  { word: "dog",  emoji: "🐶" },
+  { word: "cow",  emoji: "🐄" },
+  { word: "pig",  emoji: "🐷" },
+  { word: "hen",  emoji: "🐔" },
+  { word: "fox",  emoji: "🦊" },
+  { word: "owl",  emoji: "🦉" },
+  { word: "bee",  emoji: "🐝" },
+  { word: "ant",  emoji: "🐜" },
+  { word: "bat",  emoji: "🦇" },
+  { word: "rat",  emoji: "🐀" },
+  { word: "fly",  emoji: "🪰" },
+  { word: "sun",  emoji: "☀️" },
+  { word: "sky",  emoji: "🌤️" },
+  { word: "sea",  emoji: "🌊" },
+  { word: "mud",  emoji: "🟤" },
+  { word: "ice",  emoji: "🧊" },
+  { word: "fog",  emoji: "🌫️" },
+  { word: "dew",  emoji: "💧" },
+  { word: "ear",  emoji: "👂" },
+  { word: "eye",  emoji: "👁️" },
+  { word: "lip",  emoji: "💋" },
+  { word: "arm",  emoji: "💪" },
+  { word: "leg",  emoji: "🦵" },
+  { word: "hip",  emoji: "🩳" },
+  { word: "rib",  emoji: "🫁" },
+  { word: "jaw",  emoji: "😬" },
+  { word: "toe",  emoji: "🦶" },
+  { word: "egg",  emoji: "🥚" },
+  { word: "pie",  emoji: "🥧" },
+  { word: "jam",  emoji: "🍓" },
+  { word: "tea",  emoji: "🍵" },
+  { word: "pea",  emoji: "🫛" },
+  { word: "yam",  emoji: "🍠" },
+  { word: "fig",  emoji: "🫐" },
+  { word: "red",  emoji: "🔴" },
+  { word: "tan",  emoji: "🟫" },
+  { word: "run",  emoji: "🏃" },
+  { word: "hop",  emoji: "🐰" },
+  { word: "dig",  emoji: "⛏️" },
+  { word: "sit",  emoji: "🪑" },
+  { word: "lay",  emoji: "🛌" },
+  { word: "cup",  emoji: "☕" },
+  { word: "hat",  emoji: "🎩" },
+  { word: "map",  emoji: "🗺️" },
+  { word: "top",  emoji: "🔝" },
+  { word: "pot",  emoji: "🪴" },
+  { word: "box",  emoji: "📦" },
+  { word: "net",  emoji: "🕸️" },
+  { word: "web",  emoji: "🕸️" },
+  { word: "pen",  emoji: "🖊️" },
+  { word: "pin",  emoji: "📌" },
+  { word: "zip",  emoji: "🤐" },
+  { word: "sad",  emoji: "😢" },
+  { word: "mad",  emoji: "😠" },
+  { word: "bad",  emoji: "😈" },
+  { word: "fun",  emoji: "🎉" },
+  { word: "hot",  emoji: "🔥" },
+  { word: "car",  emoji: "🚗" },
+  { word: "bus",  emoji: "🚌" },
+  { word: "van",  emoji: "🚐" },
+  { word: "bear",  emoji: "🐻" },
+  { word: "wolf",  emoji: "🐺" },
+  { word: "deer",  emoji: "🦌" },
+  { word: "frog",  emoji: "🐸" },
+  { word: "duck",  emoji: "🦆" },
+  { word: "goat",  emoji: "🐐" },
+  { word: "lion",  emoji: "🦁" },
+  { word: "mole",  emoji: "🐹" },
+  { word: "hare",  emoji: "🐇" },
+  { word: "toad",  emoji: "🐸" },
+  { word: "dino",  emoji: "🦕" },
+  { word: "fish",  emoji: "🐟" },
+  { word: "bird",  emoji: "🐦" },
+  { word: "rain",  emoji: "🌧️" },
+  { word: "snow",  emoji: "❄️" },
+  { word: "wind",  emoji: "💨" },
+  { word: "leaf",  emoji: "🍂" },
+  { word: "rock",  emoji: "🪨" },
+  { word: "sand",  emoji: "🏖️" },
+  { word: "dirt",  emoji: "🟤" },
+  { word: "moss",  emoji: "🌿" },
+  { word: "soil",  emoji: "🟫" },
+  { word: "clay",  emoji: "🏺" },
+  { word: "hail",  emoji: "🧊" },
+  { word: "mist",  emoji: "🌫️" },
+  { word: "dusk",  emoji: "🌆" },
+  { word: "dawn",  emoji: "🌅" },
+  { word: "noon",  emoji: "🌞" },
+  { word: "tree",  emoji: "🌳" },
+  { word: "neck",  emoji: "🧣" },
+  { word: "face",  emoji: "😊" },
+  { word: "nose",  emoji: "👃" },
+  { word: "knee",  emoji: "🦵" },
+  { word: "back",  emoji: "🔙" },
+  { word: "hair",  emoji: "💇" },
+  { word: "skin",  emoji: "🧴" },
+  { word: "palm",  emoji: "🖐️" },
+  { word: "milk",  emoji: "🥛" },
+  { word: "cake",  emoji: "🎂" },
+  { word: "rice",  emoji: "🍚" },
+  { word: "pear",  emoji: "🍐" },
+  { word: "plum",  emoji: "🟣" },
+  { word: "corn",  emoji: "🌽" },
+  { word: "bean",  emoji: "🫘" },
+  { word: "nut",  emoji: "🥜" },
+  { word: "blue",  emoji: "🔵" },
+  { word: "pink",  emoji: "🩷" },
+  { word: "gold",  emoji: "🥇" },
+  { word: "lime",  emoji: "🟢" },
+  { word: "mint",  emoji: "🌿" },
+  { word: "jump",  emoji: "🦘" },
+  { word: "swim",  emoji: "🏊" },
+  { word: "clap",  emoji: "👏" },
+  { word: "spin",  emoji: "🌀" },
+  { word: "roll",  emoji: "🎲" },
+  { word: "walk",  emoji: "🚶" },
+  { word: "talk",  emoji: "🗣️" },
+  { word: "sing",  emoji: "🎤" },
+  { word: "draw",  emoji: "🎨" },
+  { word: "cook",  emoji: "👨‍🍳" },
+  { word: "read",  emoji: "📖" },
+  { word: "play",  emoji: "🎮" },
+  { word: "hug",  emoji: "🤗" },
+  { word: "book",  emoji: "📖" },
+  { word: "ball",  emoji: "⚽" },
+  { word: "bell",  emoji: "🔔" },
+  { word: "door",  emoji: "🚪" },
+  { word: "roof",  emoji: "🏠" },
+  { word: "lamp",  emoji: "💡" },
+  { word: "calm",  emoji: "😌" },
+  { word: "cool",  emoji: "😎" },
+  { word: "warm",  emoji: "🔥" },
+  { word: "bike",  emoji: "🚲" },
+  { word: "boat",  emoji: "⛵" },
+  { word: "taxi",  emoji: "🚕" },
+  { word: "jeep",  emoji: "🚙" },
+  { word: "drum",  emoji: "🥁" },
+  { word: "gong",  emoji: "🎵" },
+  { word: "horn",  emoji: "📯" },
+  { word: "home",  emoji: "🏠" },
+  { word: "room",  emoji: "🚪" },
+  { word: "wall",  emoji: "🧱" },
+  { word: "desk",  emoji: "🪑" },
+  { word: "glue",  emoji: "🧴" },
+  { word: "game",  emoji: "🎮" },
+  { word: "star",  emoji: "⭐" },
+  { word: "moon",  emoji: "🌙" },
+  { word: "wish",  emoji: "✨" },
+  { word: "kite",  emoji: "🪁" },
+];
+
+// Shuffle and pick a fresh set of words per session, avoid immediate repeats.
+
+const PLAYER_NAME = "Lucas";
+const ENCOURAGEMENT = {
+  zombie: "You spelled Zombie — you did it!",
+  grandpa: "Grandpa loves you!",
+  mommy: "Mommy is proud of you!",
+  daddy: "Daddy is proud of you!",
+  sven: "Sven the reindeer is awesome!",
+  unicorns: "Unicorns are magic and so are you!"
+};
+
+let deck = shuffle(WORDS.map((w, i) => i));
+let deckPos = 0;
+let current = null;
+let starsEarned = 0;
+let advanceTimer = null; // pending auto-advance after a correct word
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function nextWord() {
+  clearTimeout(advanceTimer); // Next button pressed early: drop the pending auto-advance
+  if (deckPos >= deck.length) { deck = shuffle(WORDS.map((_, i) => i)); deckPos = 0; }
+  current = WORDS[deck[deckPos++]];
+  startWord();
+}
+
+// ---- DOM refs ----
+const pictureEl = document.getElementById("picture");
+const labelEl   = document.getElementById("word-label");
+const slotsEl   = document.getElementById("slots");
+const lettersEl = document.getElementById("letters");
+const starsEl   = document.getElementById("stars");
+const progressEl= document.getElementById("progress-bar");
+const overlay   = document.getElementById("overlay");
+
+// Build the star display (5 stars across a full set of 5 words)
+function buildStars() {
+  starsEl.innerHTML = "";
+  for (let i = 0; i < 5; i++) {
+    const s = document.createElement("span");
+    s.className = "star";
+    s.id = "star-" + i;
+    s.textContent = "⭐";
+    s.style.opacity = i < starsEarned ? "1" : "0.25";
+    s.style.display = "inline-block";
+    starsEl.appendChild(s);
+  }
+}
+buildStars();
+
+function startWord() {
+  overlay.classList.remove("show");
+  pictureEl.textContent = current.emoji;
+  labelEl.textContent = PLAYER_NAME + ", spell the word";
+  slotsEl.innerHTML = "";
+  lettersEl.innerHTML = "";
+
+  const letters = current.word.split("");
+  const slotData = letters.map((ch, i) => ({ index: i, char: ch, tile: null }));
+
+  // Create slots
+  slotData.forEach((sd, i) => {
+    const slot = document.createElement("div");
+    slot.className = "slot";
+    slot.dataset.index = i;
+    slotsEl.appendChild(slot);
+  });
+
+  // Build tiles: the real letters + a couple of distractors (for longer words keep it simple)
+  let tileLetters = letters.slice();
+  const extra = "abcdefghijklmnopqrstuvwxyz";
+  const distractors = Math.min(2, letters.length); // 2 extra letters
+  for (let d = 0; d < distractors; d++) {
+    let ch;
+    do { ch = extra[Math.floor(Math.random() * 26)]; } while (tileLetters.includes(ch));
+    tileLetters.push(ch);
+  }
+  tileLetters = shuffle(tileLetters);
+
+  tileLetters.forEach((ch) => {
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    tile.textContent = ch;
+    tile.dataset.letter = ch;
+    tile.setAttribute("role", "button");
+    tile.setAttribute("tabindex", "0");
+    lettersEl.appendChild(tile);
+    // click / tap to place
+    tile.addEventListener("click", () => placeTile(tile));
+    tile.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); placeTile(tile); }
+    });
+    // drag support
+    tile.addEventListener("pointerdown", (e) => startDrag(e, tile));
+  });
+}
+
+// Place a tile into the first empty slot.
+function placeTile(tile) {
+  if (tile.classList.contains("used")) return;
+  const empty = [...slotsEl.children].find(s => !s.classList.contains("filled"));
+  if (!empty) return;
+  const idx = Number(empty.dataset.index);
+  fillSlot(idx, tile);
+}
+
+function fillSlot(idx, tile) {
+  const slot = slotsEl.children[idx];
+  if (slot.classList.contains("filled")) return;
+  slot.textContent = tile.dataset.letter;
+  slot.classList.add("filled");
+  slot.dataset.tile = tile;
+  tile.classList.add("used");
+  checkWord();
+}
+
+function checkWord() {
+  const filled = [...slotsEl.children].every(s => s.classList.contains("filled"));
+  if (!filled) return;
+  const guess = [...slotsEl.children].map(s => s.textContent).join("");
+  if (guess === current.word) {
+    celebrate();
+  } else {
+    // shake and clear
+    [...slotsEl.children].forEach(s => s.classList.add("wrong"));
+    setTimeout(() => {
+      [...slotsEl.children].forEach(s => { s.classList.remove("wrong"); clearSlot(s); });
+      [...lettersEl.children].forEach(t => t.classList.remove("used")); // give the tiles back
+    }, 450);
+  }
+}
+
+function clearSlot(slot) {
+  slot.textContent = "";
+  slot.classList.remove("filled");
+  if (slot.dataset.tile) {
+    const t = document.querySelector(".tile[data-letter='" + slot.dataset.tile + "']");
+    // find the actual tile element by matching stored reference
+  }
+}
+
+// Clear all (button)
+document.getElementById("clear-btn").addEventListener("click", () => {
+  [...slotsEl.children].forEach(s => {
+    s.textContent = "";
+    s.classList.remove("filled");
+  });
+  [...lettersEl.children].forEach(t => t.classList.remove("used"));
+});
+
+// Hint: reveal the next empty slot's correct letter
+document.getElementById("hint-btn").addEventListener("click", () => {
+  const empty = [...slotsEl.children].find(s => !s.classList.contains("filled"));
+  if (!empty) return;
+  const idx = Number(empty.dataset.index);
+  const correct = current.word[idx];
+  empty.textContent = correct;
+  empty.classList.add("filled", "hinted");
+  empty.dataset.hinted = "1";
+  setTimeout(() => empty.classList.remove("hinted"), 1500);
+  // mark a matching tile as used
+  const tile = [...lettersEl.children].find(t => t.dataset.letter === correct && !t.classList.contains("used"));
+  if (tile) tile.classList.add("used");
+  checkWord();
+});
+
+function celebrate() {
+  starsEarned = Math.min(5, starsEarned + 1);
+  buildStars();
+  progressEl.style.width = (starsEarned / 5 * 100) + "%";
+  overlay.classList.add("show");
+  confetti();
+  speak((ENCOURAGEMENT[current.word] || "Great job! You spelled " + current.word) + " " + PLAYER_NAME + "!");
+  // Auto-advance after 2.5s so no keyboard/mouse is needed
+  advanceTimer = setTimeout(nextWord, 2500);
+}
+
+// Keep the Next button for touch/mouse users who want to go faster
+document.getElementById("next-btn").addEventListener("click", nextWord);
+
+// ---- Speech (helps 2-6 yo connect sound to letters) ----
+function speak(text) {
+  try {
+    if ("speechSynthesis" in window) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.85;
+      u.pitch = 1.1;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    }
+  } catch (e) {}
+}
+
+// ---- Confetti ----
+function confetti() {
+  const colors = ["#ff7b54", "#4ecdc4", "#7bc043", "#ffd166", "#ef476f", "#118ab2"];
+  for (let i = 0; i < 60; i++) {
+    const c = document.createElement("div");
+    c.className = "confetti";
+    c.style.left = Math.random() * 100 + "vw";
+    c.style.background = colors[Math.floor(Math.random() * colors.length)];
+    c.style.animationDuration = (1.5 + Math.random() * 1.5) + "s";
+    c.style.animationDelay = (Math.random() * 0.4) + "s";
+    c.style.borderRadius = Math.random() > 0.5 ? "50%" : "2px";
+    document.body.appendChild(c);
+    setTimeout(() => c.remove(), 3500);
+  }
+}
+
+// ---- Drag & drop (pointer events: works for mouse AND touch) ----
+let dragTile = null, ghost = null;
+
+function startDrag(e, tile) {
+  // Only start a real drag if it's not a simple tap; we start on pointerdown and
+  // convert to a tap if the pointer barely moved.
+  if (tile.classList.contains("used")) return;
+  dragTile = tile;
+  const startX = e.clientX, startY = e.clientY;
+  let moved = false;
+
+  function move(ev) {
+    if (Math.abs(ev.clientX - startX) > 6 || Math.abs(ev.clientY - startY) > 6) moved = true;
+    if (moved) {
+      if (!ghost) {
+        ghost = tile.cloneNode(true);
+        ghost.classList.add("ghost");
+        document.body.appendChild(ghost);
+        tile.classList.add("dragging");
+      }
+      ghost.style.left = ev.clientX + "px";
+      ghost.style.top = ev.clientY + "px";
+    }
+  }
+  function up(ev) {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
+    if (ghost) {
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      const slot = target && target.closest ? target.closest(".slot") : null;
+      if (slot && !slot.classList.contains("filled")) {
+        fillSlot(Number(slot.dataset.index), tile);
+      }
+      ghost.remove();
+      ghost = null;
+      tile.classList.remove("dragging");
+    }
+    // A plain tap is placed by the tile's "click" handler. Placing it here too meant the
+    // celebration could appear before the click, which then hit the "Next" button.
+    dragTile = null;
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
+}
+
+// ---- Keyboard: type a letter to fill the next empty slot ----
+window.addEventListener("keydown", (e) => {
+  if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+    const ch = e.key.toLowerCase();
+    const tile = [...lettersEl.children].find(t => t.dataset.letter === ch && !t.classList.contains("used"));
+    if (tile) placeTile(tile);
+  }
+});
+
+// ---- Go ----
+nextWord();
+</script>
+<a id="home-link" href="./" aria-label="Back to games">🏠</a>
+<style>
+  #home-link { position: fixed; left: calc(10px + env(safe-area-inset-left)); bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 60; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.85);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;
+    font-size: 22px; text-decoration: none; }
+</style>
+<script>
+if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js"); }); }
+</script>
+</body>
+</html>

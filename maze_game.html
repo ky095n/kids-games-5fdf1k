@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kids Games">
+<meta name="theme-color" content="#ff7b54">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Maze Adventure</title>
+<style>
+  :root {
+    --bg1: #fef9f0;
+    --bg2: #fdf2e3;
+    --card: #ffffff;
+    --accent: #ff7b54;
+    --accent2: #4ecdc4;
+    --good: #7bc043;
+    --text: #3a3a3a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; touch-action: manipulation; }
+  body {
+    font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Segoe UI", sans-serif;
+    background: linear-gradient(160deg, var(--bg1), var(--bg2));
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #topbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.5);
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-weight: bold;
+    font-size: clamp(13px, 3.5vw, 17px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    white-space: nowrap;
+  }
+  #topbar .spacer { flex: 1; }
+
+  #stage {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  #board-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 92vh;
+    /* Take only the space left after the buttons and D-pad, so nothing is pushed off screen */
+    flex: 1 1 0;
+    min-height: 0;
+    container-type: size;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas#board {
+    width: 100%;
+    height: 100%;
+    /* Largest square that fits (browsers without container units keep the 100% above) */
+    width: min(100cqw, 100cqh);
+    height: min(100cqw, 100cqh);
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    background: #fff;
+    display: block;
+  }
+
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 4px 10px 12px;
+    max-width: 100%;
+  }
+  button {
+    font-family: inherit;
+    font-weight: bold;
+    font-size: clamp(13px, 3.5vw, 16px);
+    border: none;
+    border-radius: 14px;
+    padding: 8px 14px;
+    background: var(--card);
+    color: var(--text);
+    box-shadow: 0 3px 0 rgba(0,0,0,0.12);
+    cursor: pointer;
+  }
+  button:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.12); }
+  button.primary { background: var(--accent); color: #fff; }
+  button.teal { background: var(--accent2); color: #fff; }
+  select {
+    font-family: inherit;
+    font-weight: bold;
+    font-size: clamp(13px, 3.5vw, 16px);
+    border-radius: 14px;
+    padding: 8px 10px;
+    border: none;
+    background: var(--card);
+    color: var(--text);
+    box-shadow: 0 3px 0 rgba(0,0,0,0.12);
+  }
+
+  /* ---- D-pad ---- */
+  #dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 52px);
+    grid-template-rows: repeat(3, 52px);
+    gap: 4px;
+    margin-top: 2px;
+  }
+  #dpad button {
+    border-radius: 12px;
+    font-size: 20px;
+    padding: 0;
+    background: rgba(255,255,255,0.85);
+  }
+  #dpad .up { grid-column: 2; grid-row: 1; }
+  #dpad .left { grid-column: 1; grid-row: 2; }
+  #dpad .right { grid-column: 3; grid-row: 2; }
+  #dpad .down { grid-column: 2; grid-row: 3; }
+
+  /* Phone held sideways: too short for maze + buttons + D-pad stacked, so lay them
+     out side by side: D-pad | maze | buttons. */
+  @media (orientation: landscape) and (max-height: 500px) {
+    #stage {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-rows: minmax(0, 1fr);
+      grid-template-areas: "dpad board controls";
+      align-items: center;
+      justify-items: center;
+      column-gap: 10px;
+    }
+    #board-wrap { grid-area: board; align-self: stretch; justify-self: stretch; max-width: none; }
+    #dpad { grid-area: dpad; }
+    #controls { grid-area: controls; flex-direction: column; flex-wrap: nowrap; padding: 4px 0; }
+  }
+  /* Short screens: a slightly smaller D-pad (44px is still Apple's minimum tap size)
+     leaves more room for the maze. */
+  @media (max-height: 620px) {
+    #dpad { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
+  }
+
+  /* ---- Win overlay ---- */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(255,255,255,0.88);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    z-index: 50;
+  }
+  #overlay.show { display: flex; }
+  #overlay .big { font-size: clamp(40px, 12vw, 80px); }
+  #overlay .msg { font-size: clamp(22px, 7vw, 40px); font-weight: bold; color: var(--accent); }
+  #overlay .sub { font-size: clamp(15px, 4.5vw, 22px); color: #666; }
+
+  .confetti-piece {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    top: -20px;
+    z-index: 60;
+    pointer-events: none;
+    animation: fall linear forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(110vh) rotate(720deg); }
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="stat" id="maze-name">Maze</span>
+  <span class="stat" id="moves">Moves: 0</span>
+  <span class="stat" id="best">Best: -</span>
+  <span class="spacer"></span>
+  <span class="stat" id="hint-btn" style="background:var(--accent2);color:#fff;cursor:pointer;">🔊 Hint</span>
+</div>
+
+<div id="stage">
+  <div id="board-wrap">
+    <canvas id="board"></canvas>
+  </div>
+  <div id="controls">
+    <select id="maze-select" aria-label="Choose a maze"></select>
+    <button class="primary" id="new-maze">🎲 New Maze</button>
+    <button id="restart">↻ Restart</button>
+    <button id="sound-toggle" class="teal">🔊 Sound</button>
+  </div>
+  <div id="dpad">
+    <button class="up" data-dir="N" aria-label="Up">⬆️</button>
+    <button class="left" data-dir="W" aria-label="Left">⬅️</button>
+    <button class="right" data-dir="E" aria-label="Right">➡️</button>
+    <button class="down" data-dir="S" aria-label="Down">⬇️</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="big">🎉</div>
+  <div class="msg">Great Job, Lucas!</div>
+  <div class="sub" id="overlay-sub">You found your way out!</div>
+  <button class="primary" id="play-again">Play Again</button>
+</div>
+
+<script>
+// ===================== Config =====================
+const PLAYER_NAME = "Lucas";
+const START = { c: 0, r: 0 };
+const GOAL = { c: -1, r: -1 }; // set to (cols-1, rows-1) at load
+
+// Color themes: each maze gets a palette
+const THEMES = [
+  { name: "Sunny",  wall: "#ff7b54", floor: "#fff8ee", start: "#4ecdc4", goal: "#ffd166" },
+  { name: "Ocean",  wall: "#118ab2", floor: "#eaf7fb", start: "#4ecdc4", goal: "#ffd166" },
+  { name: "Forest", wall: "#7bc043", floor: "#f2fae9", start: "#ff7b54", goal: "#ffd166" },
+  { name: "Bubblegum", wall: "#ef476f", floor: "#fdf0f4", start: "#4ecdc4", goal: "#ffd166" },
+  { name: "Royal",  wall: "#7b5ea7", floor: "#f4f0fa", start: "#ffd166", goal: "#4ecdc4" },
+  { name: "Candy",  wall: "#f78fb3", floor: "#fff5f9", start: "#7bc043", goal: "#118ab2" },
+];
+
+// ===================== Maze generation (recursive backtracker) =====================
+// openw[r][c] = Set of open walls among 'N','E','S','W'
+const DIRS = { N: [0,-1], E: [1,0], S: [0,1], W: [-1,0] };
+const OPP  = { N: 'S', S: 'N', E: 'W', W: 'E' };
+
+function genMaze(cols, rows, rng) {
+  const openw = Array.from({length: rows}, () => Array.from({length: cols}, () => new Set()));
+  const visited = Array.from({length: rows}, () => new Array(cols).fill(false));
+  const stack = [[0,0]];
+  visited[0][0] = true;
+  while (stack.length) {
+    const [c, r] = stack[stack.length-1];
+    const opts = [];
+    for (const wall in DIRS) {
+      const [dx, dy] = DIRS[wall];
+      const nc = c+dx, nr = r+dy;
+      if (nc>=0 && nc<cols && nr>=0 && nr<rows && !visited[nr][nc]) opts.push([nc,nr,wall]);
+    }
+    if (opts.length) {
+      const [nc, nr, wall] = opts[Math.floor(rng()*opts.length)];
+      openw[r][c].add(wall);
+      openw[nr][nc].add(OPP[wall]);
+      visited[nr][nc] = true;
+      stack.push([nc,nr]);
+    } else {
+      stack.pop();
+    }
+  }
+  return openw;
+}
+
+// BFS shortest path from start to goal (for hints + verification)
+function solvePath(openw, cols, rows) {
+  const goal = { c: cols-1, r: rows-1 };
+  const q = [[0,0]];
+  const prev = new Map();
+  prev.set("0,0", null);
+  while (q.length) {
+    const [c, r] = q.shift();
+    if (c === goal.c && r === goal.r) {
+      const path = [];
+      let key = c+","+r;
+      while (key) {
+        const [pc, pr] = key.split(",").map(Number);
+        path.unshift({c: pc, r: pr});
+        key = prev.get(key);
+      }
+      return path;
+    }
+    for (const wall in DIRS) {
+      if (openw[r][c].has(wall)) {
+        const [dx, dy] = DIRS[wall];
+        const nc = c+dx, nr = r+dy;
+        const k = nc+","+nr;
+        if (!prev.has(k)) { prev.set(k, c+","+r); q.push([nc,nr]); }
+      }
+    }
+  }
+  return null;
+}
+
+// ===================== 10 preset mazes =====================
+// Each preset: fixed-size maze generated with a fixed seed so it's always the same maze.
+// Seeded PRNG (mulberry32) so presets are deterministic.
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const PRESETS = [
+  { name: "1 · Tiny Garden",  cols: 5,  rows: 5,  seed: 101, theme: 0 },
+  { name: "2 · Little Pond",  cols: 6,  rows: 6,  seed: 202, theme: 1 },
+  { name: "3 · Tree Hollow",  cols: 7,  rows: 7,  seed: 303, theme: 2 },
+  { name: "4 · Berry Patch",  cols: 8,  rows: 8,  seed: 404, theme: 3 },
+  { name: "5 · Star Castle",  cols: 8,  rows: 8,  seed: 505, theme: 4 },
+  { name: "6 · Sweet Shop",   cols: 9,  rows: 9,  seed: 606, theme: 5 },
+  { name: "7 · Big Meadow",   cols: 10, rows: 10, seed: 707, theme: 0 },
+  { name: "8 · Deep Sea",     cols: 11, rows: 11, seed: 808, theme: 1 },
+  { name: "9 · Wild Forest",  cols: 12, rows: 12, seed: 909, theme: 2 },
+  { name: "10 · Mega Mountain", cols: 14, rows: 14, seed: 1010, theme: 4 },
+];
+
+// ===================== State =====================
+let cols = 7, rows = 7;
+let openw = null;
+let player = { c: 0, r: 0 };
+let moves = 0;
+let currentTheme = THEMES[0];
+let currentName = "Maze";
+let bestMoves = null;
+let soundOn = true;
+let hintPath = null;
+let hintTimer = null;
+let won = false;
+let winId = 0; // bumped on every maze load so a stale win auto-advance does nothing
+
+// ===================== Canvas =====================
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  if (!openw || rect.width === 0 || rect.height === 0) return; // maze or layout not ready yet
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resizeCanvas);
+// iOS Safari sometimes fires layout after DOMContentLoaded; catch it here.
+window.addEventListener("load", () => requestAnimationFrame(resizeCanvas));
+
+function cellSize() {
+  const rect = canvas.getBoundingClientRect();
+  const w = rect.width || 100;
+  const h = rect.height || 100;
+  return { w: w / cols, h: h / rows };
+}
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  const W = rect.width, H = rect.height;
+  const cs = cellSize();
+
+  // floor
+  ctx.fillStyle = currentTheme.floor;
+  ctx.fillRect(0, 0, W, H);
+
+  // goal (star)
+  drawStar(cs.w * (cols-1) + cs.w/2, cs.h * (rows-1) + cs.h/2, cs.w*0.32, currentTheme.goal);
+
+  // hint path
+  if (hintPath) {
+    ctx.strokeStyle = "rgba(255,209,102,0.55)";
+    ctx.lineWidth = cs.w * 0.18;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    hintPath.forEach((p, i) => {
+      const x = cs.w * p.c + cs.w/2, y = cs.h * p.r + cs.h/2;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  // walls
+  ctx.strokeStyle = currentTheme.wall;
+  ctx.lineWidth = Math.max(3, cs.w * 0.12);
+  ctx.lineCap = "round";
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = cs.w * c, y = cs.h * r;
+      const w = cs.w, h = cs.h;
+      // outer boundary always drawn
+      if (r === 0) line(x, y, x+w, y);
+      if (r === rows-1) line(x, y+h, x+w, y+h);
+      if (c === 0) line(x, y, x, y+h);
+      if (c === cols-1) line(x+w, y, x+w, y+h);
+      // inner walls
+      if (c < cols-1 && !openw[r][c].has("E")) line(x+w, y, x+w, y+h);
+      if (r < rows-1 && !openw[r][c].has("S")) line(x, y+h, x+w, y+h);
+    }
+  }
+
+  // player (Sven the reindeer)
+  const px = cs.w * player.c + cs.w/2, py = cs.h * player.r + cs.h/2;
+  ctx.font = (cs.w * 0.7) + "px serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("🦌", px, py + cs.h*0.05);
+}
+
+function line(x1, y1, x2, y2) {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+}
+
+function drawStar(cx, cy, r, color) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "rgba(0,0,0,0.15)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const ang = (Math.PI/5) * i - Math.PI/2;
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    const x = cx + Math.cos(ang) * rad;
+    const y = cy + Math.sin(ang) * rad;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ===================== Game logic =====================
+function loadMaze(openw_, cols_, rows_, theme, name) {
+  openw = openw_;
+  cols = cols_;
+  rows = rows_;
+  currentTheme = theme;
+  currentName = name;
+  player = { c: 0, r: 0 };
+  moves = 0;
+  won = false;
+  winId++;
+  hintPath = null;
+  if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
+  updateHUD();
+  resizeCanvas();
+}
+
+function newRandomMaze() {
+  const sizes = [[5,5],[7,7],[9,9],[11,11],[13,13]];
+  const [c, r] = sizes[Math.floor(Math.random()*sizes.length)];
+  const theme = THEMES[Math.floor(Math.random()*THEMES.length)];
+  const rng = Math.random;
+  const mw = genMaze(c, r, rng);
+  // verify solvable
+  if (!solvePath(mw, c, r)) return newRandomMaze();
+  loadMaze(mw, c, r, theme, "Random Maze");
+  speak("New maze! Find the star, " + PLAYER_NAME + "!");
+}
+
+function loadPreset(index) {
+  const p = PRESETS[index];
+  const rng = mulberry32(p.seed);
+  const mw = genMaze(p.cols, p.rows, rng);
+  if (!solvePath(mw, p.cols, p.rows)) { speak("Oops, let me try again!"); return; }
+  loadMaze(mw, p.cols, p.rows, THEMES[p.theme], p.name);
+  speak(p.name + ". Find the star, " + PLAYER_NAME + "!");
+}
+
+function tryMove(dir) {
+  if (won) return;
+  if (openw[player.r][player.c].has(dir)) {
+    const [dx, dy] = DIRS[dir];
+    player.c += dx;
+    player.r += dy;
+    moves++;
+    updateHUD();
+    draw();
+    // little step sound
+    if (soundOn) beep(300, 0.05, 0.08);
+    if (player.c === cols-1 && player.r === rows-1) win();
+  } else {
+    // bump sound
+    if (soundOn) beep(150, 0.08, 0.12);
+  }
+}
+
+function win() {
+  won = true;
+  const overlay = document.getElementById("overlay");
+  overlay.classList.add("show");
+  document.getElementById("overlay-sub").textContent = "You found your way out in " + moves + " moves!";
+  confetti();
+  if (soundOn) { beep(523, 0.12, 0.15); setTimeout(()=>beep(659,0.12,0.15),130); setTimeout(()=>beep(784,0.2,0.15),260); }
+  const winSpeech = speak("Great job, " + PLAYER_NAME + "! You found your way out in " + moves + " moves!");
+  // best score
+  if (bestMoves === null || moves < bestMoves) {
+    bestMoves = moves;
+    try { localStorage.setItem("maze_best", String(bestMoves)); } catch(e) {}
+  }
+  updateHUD();
+  // auto-advance: let the win voice finish, but never advance before 3s (so the
+  // celebration reads) or after 8s (so a failed/hung speech can't stall the game).
+  const FLOOR = 3000, CAP = 8000;
+  let advanced = false;
+  const myWin = winId;
+  const doAdvance = () => {
+    if (advanced || myWin !== winId) return; // a new maze was already loaded
+    advanced = true;
+    if (winSpeech) { try { winSpeech.onend = null; winSpeech.onerror = null; } catch(e) {} }
+    clearTimeout(capTimer);
+    overlay.classList.remove("show");
+    newRandomMaze();
+  };
+  const capTimer = setTimeout(doAdvance, CAP);
+  if (winSpeech) {
+    winSpeech.onend = doAdvance;
+    winSpeech.onerror = doAdvance;
+  } else {
+    setTimeout(doAdvance, FLOOR);
+  }
+}
+
+function restart() {
+  player = { c: 0, r: 0 };
+  moves = 0;
+  won = false;
+  hintPath = null;
+  if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
+  updateHUD();
+  draw();
+}
+
+function showHint() {
+  if (won) return;
+  const path = solvePath(openw, cols, rows);
+  if (path) {
+    hintPath = path;
+    draw();
+    if (soundOn) speak("Follow the golden path to the star!");
+    hintTimer = setTimeout(() => { hintPath = null; draw(); }, 5000);
+  }
+}
+
+function updateHUD() {
+  document.getElementById("maze-name").textContent = currentName;
+  document.getElementById("moves").textContent = "Moves: " + moves;
+  document.getElementById("best").textContent = "Best: " + (bestMoves === null ? "-" : bestMoves);
+}
+
+// ===================== Sound =====================
+let audioCtx = null;
+function beep(freq, dur, vol) {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.value = vol;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+
+// ===================== Speech =====================
+function speak(text) {
+  if (!soundOn) return null;
+  try {
+    if ("speechSynthesis" in window) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.85;
+      u.pitch = 1.1;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+      return u;
+    }
+  } catch (e) {}
+  return null;
+}
+
+// ===================== Confetti =====================
+function confetti() {
+  const colors = ["#ff7b54", "#4ecdc4", "#7bc043", "#ffd166", "#ef476f", "#118ab2"];
+  for (let i = 0; i < 60; i++) {
+    const el = document.createElement("div");
+    el.className = "confetti-piece";
+    el.style.left = Math.random()*100 + "vw";
+    el.style.background = colors[Math.floor(Math.random()*colors.length)];
+    el.style.animationDuration = (1.5 + Math.random()*1.5) + "s";
+    el.style.animationDelay = Math.random()*0.5 + "s";
+    el.style.borderRadius = Math.random() > 0.5 ? "50%" : "2px";
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+}
+
+// ===================== Input =====================
+document.addEventListener("keydown", (e) => {
+  const map = {
+    ArrowUp: "N", ArrowDown: "S", ArrowLeft: "W", ArrowRight: "E",
+    w: "N", s: "S", a: "W", d: "E",
+    W: "N", S: "S", A: "W", D: "E",
+  };
+  const dir = map[e.key];
+  if (dir) { e.preventDefault(); tryMove(dir); }
+});
+
+document.querySelectorAll("#dpad button").forEach(btn => {
+  const dir = btn.dataset.dir;
+  btn.addEventListener("pointerdown", (e) => { e.preventDefault(); tryMove(dir); });
+});
+
+document.getElementById("new-maze").addEventListener("click", newRandomMaze);
+document.getElementById("restart").addEventListener("click", restart);
+document.getElementById("play-again").addEventListener("click", () => {
+  document.getElementById("overlay").classList.remove("show");
+  newRandomMaze();
+});
+document.getElementById("hint-btn").addEventListener("click", showHint);
+document.getElementById("sound-toggle").addEventListener("click", function() {
+  soundOn = !soundOn;
+  this.textContent = soundOn ? "🔊 Sound" : "🔇 Muted";
+  if (!soundOn && "speechSynthesis" in window) window.speechSynthesis.cancel();
+});
+
+// maze select dropdown
+const sel = document.getElementById("maze-select");
+sel.innerHTML = "";
+const randOpt = document.createElement("option");
+randOpt.value = "random";
+randOpt.textContent = "🎲 Random";
+sel.appendChild(randOpt);
+PRESETS.forEach((p, i) => {
+  const opt = document.createElement("option");
+  opt.value = String(i);
+  opt.textContent = p.name;
+  sel.appendChild(opt);
+});
+sel.addEventListener("change", function() {
+  if (this.value === "random") newRandomMaze();
+  else loadPreset(parseInt(this.value, 10));
+});
+
+// ===================== Init =====================
+try {
+  const b = localStorage.getItem("maze_best");
+  if (b !== null) bestMoves = parseInt(b, 10);
+} catch(e) {}
+
+// start with preset 3 (Tree Hollow, 7x7) — a good first maze
+// Deferred until layout is settled so canvas.getBoundingClientRect() returns
+// real sizes on iOS Safari (where the script can run before flexbox has sized
+// the board). requestAnimationFrame guarantees at least one full layout pass.
+function init() {
+  // Force a synchronous layout read so the canvas has a real CSS size
+  void document.body.offsetHeight;
+  loadPreset(2);
+  sel.value = "2";
+  speak("Welcome to Maze Adventure! Help Sven the reindeer find the star. Use the arrows or the buttons. Good luck, " + PLAYER_NAME + "!");
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(init));
+} else {
+  requestAnimationFrame(init);
+}
+</script>
+<a id="home-link" href="./" aria-label="Back to games">🏠</a>
+<style>
+  #home-link { position: fixed; left: calc(10px + env(safe-area-inset-left)); bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 60; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.85);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;
+    font-size: 22px; text-decoration: none; }
+</style>
+<script>
+if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js"); }); }
+</script>
+</body>
+</html>
