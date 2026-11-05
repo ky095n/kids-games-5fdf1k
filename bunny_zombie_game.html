@@ -129,13 +129,15 @@ const Sound = (function () {
         f.type = "lowpass"; f.frequency.value = o.lp;
         osc.connect(f); f.connect(g);
       } else osc.connect(g);
-      g.connect(o.bus ? tune_() : master_());
-      if (o.wobble) { // a gentle shiver on the volume: a silly rumble rather than a scary one
-        const lfo = ctx.createOscillator(), lg = ctx.createGain();
-        lfo.frequency.value = o.wobble; lg.gain.value = o.vol * 0.4;
-        lfo.connect(lg); lg.connect(g.gain);
+      let out = g;
+      if (o.wobble) { // a gentle shiver on the volume (a silly rumble, not a scary one), in its own stage after
+        // the envelope: the envelope alone sets the start and the end, so there is no click
+        const wg = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+        wg.gain.value = 1; lfo.frequency.value = o.wobble; lg.gain.value = 0.4; // gain swings 0.6..1.4 x the envelope
+        lfo.connect(lg); lg.connect(wg.gain); g.connect(wg); out = wg;
         lfo.start(t); lfo.stop(t + o.dur + 0.05);
       }
+      out.connect(o.bus ? tune_() : master_());
       osc.start(t); osc.stop(t + o.dur + 0.05);
     } catch (e) { /* audio is a bonus; never break the game */ }
   }
@@ -148,7 +150,13 @@ const Sound = (function () {
   const BASS = [48, 53, 48, 55]; // C F C G
   const STEP = 0.2;
 
+  // iOS suspends / "interrupts" the context when the phone is locked or the app switched: every touch or key wakes it.
+  function wake() {
+    try { if (ctx && ctx.state !== "running" && ctx.resume) ctx.resume().catch(() => {}); } catch (e) { /* ignore */ }
+  }
+
   return {
+    wake,
     unlock() {
       if (unlocked) return;
       unlocked = true;
@@ -156,7 +164,7 @@ const Sound = (function () {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (AC) {
           ctx = new AC();
-          if (ctx.resume) ctx.resume();
+          wake();
           const o = ctx.createOscillator(), g = ctx.createGain(); // silent blip: wakes iOS audio inside the tap
           g.gain.value = 0; o.connect(g); g.connect(ctx.destination);
           o.start(); o.stop(ctx.currentTime + 0.02);
@@ -174,9 +182,7 @@ const Sound = (function () {
         Speech.cancel();
         try { if (master) master.disconnect(); } catch (e) { /* ignore */ }
         master = null; tuneBus = null; tuneNext = 0; // sounds already queued go to a dead end
-      } else if (ctx) {
-        try { if (ctx.resume) ctx.resume(); } catch (e) { /* ignore */ }
-      }
+      } else wake();
     },
     isMuted() { return muted; },
 
@@ -716,7 +722,8 @@ BZ.view = (function () {
   const groundCv = document.createElement("canvas"), gg = groundCv.getContext("2d");
   let groundKey = "", groundBoard = null, obstacles = [];
   let glowCell = null; // {c, r} or null: set by the input section while a finger is held
-  const anim = { kick: null, fallF: new Map(), wakeAt: new Map(), faceZ: new Map(), bunnyF: 1 };
+  const anim = { kick: null, fallF: new Map(), wakeAt: new Map(), faceZ: new Map(), bunnyF: 1, shakeAt: -Infinity };
+  const SHAKE_MS = 150;
 
   // ---------- small helpers ----------
   const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -1061,6 +1068,11 @@ BZ.view = (function () {
     const b = S.bunny, T = L.T;
     const t = clamp01((S.time - b.hopStart) / TM.hopMs);
     const o = { c: lerp(b.fromC, b.c, t), r: lerp(b.fromR, b.r, t), lift: Math.sin(Math.PI * t) * 0.4 * T, kick: 0, f: anim.bunnyF };
+    const st = S.time - anim.shakeAt;
+    if (st >= 0 && st < SHAKE_MS) { // bumped into something: a small sideways wobble (c+k, r-k moves along screen x only)
+      const k = Math.sin(st / SHAKE_MS * 4 * Math.PI) * 0.1 * (1 - st / SHAKE_MS);
+      o.c += k; o.r -= k;
+    }
     if (S.phase === "kick" && anim.kick) {
       const kt = S.time - anim.kick.t0, z = S.zombies[anim.kick.id];
       if (z) { const dx = screenX(z.c, z.r) - screenX(b.c, b.r); if (dx) o.f = dx > 0 ? 1 : -1; }
@@ -1160,6 +1172,7 @@ BZ.view = (function () {
     }
     // the bunny shows through anything standing in front of it
     if (bunnyAt && !bunnyAt.o.scale) { g.globalAlpha = 0.3; drawBunny(g, bunnyAt.p.x, bunnyAt.p.y, BS, bunnyAt.o); g.globalAlpha = 1; }
+    if (hole.c >= 0 && (S.phase === "play" || S.phase === "kick")) holeMarker(P(hole.c, hole.r));
     if (overlays) { // KO stars and BONK bursts go on top of everything
       for (const it of items) {
         if (it.kind !== "zombie") continue;
@@ -1174,6 +1187,18 @@ BZ.view = (function () {
         twinkle(g, p.x + Math.cos(a) * 0.45 * T, p.y - o.lift - 0.55 * T + Math.sin(a) * 0.3 * T, 0.11 * T * (0.7 + 0.4 * Math.sin(t / 90 + i)));
       }
     }
+  }
+  // A bouncing arrow pointing down at the hole, drawn over everything so trees and zombies can't hide home.
+  // Faint while the bunny is close to the hole, so it never covers the bunny.
+  function holeMarker(hp) {
+    const T = L.T, b = S.bunny, h = S.board.hole, x = hp.x, w = 0.3 * T, sw = 0.12 * T, hh = 0.32 * T, len = 0.72 * T;
+    const y = hp.y - (0.5 + 0.15 * (0.5 + 0.5 * Math.sin(S.time / 220))) * T; // the arrow's tip
+    g.save();
+    g.globalAlpha = Math.max(Math.abs(b.c - h.c), Math.abs(b.r - h.r)) <= 2 ? 0.35 : 1;
+    poly(g, [x, y, x + w, y - hh, x + sw, y - hh, x + sw, y - len, x - sw, y - len, x - sw, y - hh, x - w, y - hh]);
+    g.lineJoin = "round"; g.lineWidth = Math.max(2, T * 0.07); g.strokeStyle = "#ffffff"; g.stroke();
+    g.fillStyle = "#ff7b54"; g.fill();
+    g.restore();
   }
   function headPoint(p, o, s) { // the zombie's head in screen px, for lying or standing poses
     const k = o.fall || 0, f = o.f || 1;
@@ -1456,11 +1481,12 @@ BZ.view = (function () {
     anim.kick = { id: d.zombieId, t0: S.time };
   });
   BZ.on("ko-wake", d => anim.wakeAt.set(d.zombieId, S.time));
+  BZ.on("blocked", () => { if (S.time - anim.shakeAt >= SHAKE_MS) anim.shakeAt = S.time; });
   BZ.on("hop", d => { const dx = (d.c - d.r) - (S.bunny.fromC - S.bunny.fromR); if (dx) anim.bunnyF = dx > 0 ? 1 : -1; });
   BZ.on("victory-hop", () => { const b = S.bunny, dx = (b.c - b.r) - (b.fromC - b.fromR); if (dx) anim.bunnyF = dx > 0 ? 1 : -1; });
   BZ.on("phase", d => {
     if (d.phase === "play" && S.time === 0) { // a new board: forget old animations
-      anim.kick = null; anim.fallF.clear(); anim.wakeAt.clear(); anim.faceZ.clear(); anim.bunnyF = 1;
+      anim.kick = null; anim.fallF.clear(); anim.wakeAt.clear(); anim.faceZ.clear(); anim.bunnyF = 1; anim.shakeAt = -Infinity;
     }
     syncDom(); // overlays and the label follow the phase at once, not a frame later
   });
@@ -1497,10 +1523,18 @@ BZ.input = (function () {
     for (const k of set) { dx += KEYDIR[k][0]; dy += KEYDIR[k][1]; }
     return NAME[Math.sign(dx) + "," + Math.sign(dy)]; // opposite keys cancel -> undefined
   }
+  const GRID_DIR = {}; // "dc,dr" -> screen direction name
+  for (const [k, d] of Object.entries(BZ.SCREEN_TO_GRID)) GRID_DIR[d.dc + "," + d.dr] = k;
+  // A finger steers by the square under it: one grid step toward that square (straight onto it when it is a
+  // neighbour), nothing when it is the bunny's own square. Off the board: the square it would be.
   function pointerDir(p) {
-    const b = BZ.view.cellToScreen(S.bunny.c, S.bunny.r), dx = p.x - b.x, dy = p.y - b.y;
-    if (Math.hypot(dx, dy) < BZ.view.tile * 0.3) return undefined; // on top of the bunny: nowhere to go
-    return BZ.angleToScreenDir(Math.atan2(dy, dx));
+    const b = S.bunny, cell = BZ.view.screenToCell(p.x, p.y);
+    let dc, dr;
+    if (cell) { dc = cell.c - b.c; dr = cell.r - b.r; } else {
+      const o = BZ.view.cellToScreen(b.c, b.r), T = BZ.view.tile, u = (p.x - o.x) / (T / 2), v = (p.y - o.y) / (T / 4);
+      dc = Math.round((u + v) / 2); dr = Math.round((v - u) / 2);
+    }
+    return GRID_DIR[Math.sign(dc) + "," + Math.sign(dr)]; // "0,0" (on the bunny's square) -> undefined
   }
   function lastPointer() { let p = null; for (const v of pointers.values()) p = v; return p; }
   function attempt(dir) { lastTry = S.time; return BZ.tryHop(dir); }
@@ -1585,10 +1619,12 @@ BZ.input = (function () {
   tapOnce(document.getElementById("play-again"), () => BZ.playAgain());
 
   // A tap anywhere skips the dinner, but only a finger that went down during the dinner.
-  const dinnerDown = new Set();
+  // Taps in the first 3 s are ignored, so a tap-happy child still sees the bunny get home and the family table.
+  const dinnerDown = new Set(), SKIP_AFTER_MS = 3000;
   const onToggle = e => e.target.closest && e.target.closest("#topbar");
+  const dinnerAge = () => S.time - (S.sceneEndAt - BZ.TIMING.dinnerMs);
   document.addEventListener("pointerdown", e => { if (S.phase === "dinner" && !onToggle(e)) dinnerDown.add(e.pointerId); });
-  document.addEventListener("pointerup", e => { if (dinnerDown.delete(e.pointerId) && S.phase === "dinner") BZ.skipScene(); });
+  document.addEventListener("pointerup", e => { if (dinnerDown.delete(e.pointerId) && S.phase === "dinner" && dinnerAge() >= SKIP_AFTER_MS) BZ.skipScene(); });
   document.addEventListener("pointercancel", e => { dinnerDown.delete(e.pointerId); });
   BZ.on("phase", () => dinnerDown.clear());
 
@@ -1597,7 +1633,7 @@ BZ.input = (function () {
 
 // ===================== Sound director: turns engine events and simulated time into sounds and lines =====================
 (function () {
-  const LINES = ["I will eat the bunny!", "Come here, rabbit!", "I have a carrot for you, bunny!"];
+  const LINES = ["I will eat the bunny!", "Come here, rabbit!", "I have a carrot for you, bunny!", "Call more Zombies!", "Bunny brains are YUMMY!"];
   const WELCOME = "Welcome home! You made it, " + PLAYER_NAME + "!";
   const S = BZ.state;
   let now = 0;                 // accumulated simulated ms (S.time restarts on every board, this does not)
@@ -1641,6 +1677,9 @@ BZ.input = (function () {
   BZ.on("victory-hop", () => Sound.boing());
   BZ.on("blocked", () => { if (now - lastThudAt >= 600) { lastThudAt = now; Sound.thud(); } }); // held against a wall: not a machine gun
   BZ.on("kick", () => { Sound.bonk(); Sound.groan(); });
+
+  // Any touch or key wakes a suspended audio context (pointerup too: for touch it is the gesture iOS honours).
+  for (const ev of ["pointerdown", "pointerup", "keydown"]) document.addEventListener(ev, () => Sound.wake(), true);
 
   // Sound button: one pointer path, like the other buttons.
   const toggle = document.getElementById("sound-toggle");
