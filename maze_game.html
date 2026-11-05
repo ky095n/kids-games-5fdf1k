@@ -88,6 +88,7 @@
     box-shadow: 0 8px 24px rgba(0,0,0,0.12);
     background: #fff;
     display: block;
+    touch-action: none; /* swipes on the maze move the player instead of scrolling/zooming */
   }
 
   #controls {
@@ -633,6 +634,29 @@ document.querySelectorAll("#dpad button").forEach(btn => {
   const dir = btn.dataset.dir;
   btn.addEventListener("pointerdown", (e) => { e.preventDefault(); tryMove(dir); });
 });
+
+// Touch/mouse on the maze itself: a swipe moves one step in its direction; a tap moves one
+// step toward the tapped spot (tapping the player does nothing). One move per finger lift.
+const SWIPE_PX = 24;
+let touchStart = null;
+const dirOf = (dx, dy) => Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "E" : "W") : (dy > 0 ? "S" : "N");
+canvas.addEventListener("pointerdown", (e) => {
+  if (!e.isPrimary) return;
+  e.preventDefault();
+  touchStart = { x: e.clientX, y: e.clientY, id: e.pointerId };
+});
+canvas.addEventListener("pointerup", (e) => {
+  if (!touchStart || e.pointerId !== touchStart.id) return;
+  const dx = e.clientX - touchStart.x, dy = e.clientY - touchStart.y;
+  touchStart = null;
+  if (Math.hypot(dx, dy) >= SWIPE_PX) { tryMove(dirOf(dx, dy)); return; }
+  // a tap: compare the tapped spot with the centre of the player's square
+  const rect = canvas.getBoundingClientRect(), s = cellSize();
+  const tx = e.clientX - rect.left, ty = e.clientY - rect.top;
+  if (Math.floor(tx / s.w) === player.c && Math.floor(ty / s.h) === player.r) return;
+  tryMove(dirOf(tx - (player.c + 0.5) * s.w, ty - (player.r + 0.5) * s.h));
+});
+canvas.addEventListener("pointercancel", () => { touchStart = null; });
 
 document.getElementById("new-maze").addEventListener("click", newRandomMaze);
 document.getElementById("restart").addEventListener("click", restart);
