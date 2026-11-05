@@ -1,0 +1,1687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kids Games">
+<meta name="theme-color" content="#ff7b54">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bunny &amp; Zombie</title>
+<style>
+  :root {
+    --bg1: #fef9f0;
+    --bg2: #fdf2e3;
+    --card: #ffffff;
+    --accent: #ff7b54;
+    --accent2: #4ecdc4;
+    --good: #7bc043;
+    --text: #3a3a3a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; touch-action: manipulation; }
+  body {
+    font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Segoe UI", sans-serif;
+    background: linear-gradient(160deg, var(--bg1), var(--bg2));
+    color: var(--text);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  /* ---- Top bar (52 px; the board canvas starts right below it) ---- */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; height: 52px;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 0 12px;
+    background: rgba(255,255,255,0.5);
+    z-index: 3;
+  }
+  .stat {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-weight: bold;
+    font-size: clamp(14px, 3.5vw, 17px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    white-space: nowrap;
+  }
+  #sound-toggle {
+    font-family: inherit; color: #fff; background: var(--accent2);
+    border: none; min-height: 44px; min-width: 44px; cursor: pointer;
+  }
+  #board {
+    position: fixed; top: 52px; left: 0; width: 100%; height: calc(100% - 52px);
+    display: block; z-index: 1; touch-action: none;
+  }
+  /* ---- Start screen: title and button over the canvas, which draws the bunny and zombie between them ---- */
+  #start {
+    position: fixed; top: 52px; left: 0; right: 0; bottom: 0; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    padding: 10px 16px 18px;
+    pointer-events: none;
+  }
+  #start.hidden, #play-again.hidden { display: none; }
+  #start h1 {
+    font-size: clamp(26px, min(9vw, 9vh), 52px); color: var(--accent); text-align: center;
+    text-shadow: 0 3px 0 #fff, 0 4px 8px rgba(0,0,0,0.12);
+  }
+  #tap-to-play, #play-again {
+    font-family: inherit; font-weight: bold; font-size: clamp(20px, 6vw, 28px);
+    min-width: 200px; min-height: 64px; padding: 10px 30px;
+    border: none; border-radius: 20px;
+    background: var(--accent); color: #fff;
+    box-shadow: 0 5px 0 rgba(0,0,0,0.18);
+    pointer-events: auto; cursor: pointer;
+  }
+  #play-again {
+    position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 2; /* over the bunting, clear of the dancing bunnies */
+    background: var(--good);
+  }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <span id="board-label" class="stat">Board 1 of 8</span>
+  <button id="sound-toggle" class="stat" type="button">🔊 Sound</button>
+</div>
+<canvas id="board"></canvas>
+<div id="start">
+  <h1>Bunny &amp; Zombie</h1>
+  <button id="tap-to-play" type="button">Tap to play</button>
+</div>
+<button id="play-again" class="hidden" type="button">Play again?</button>
+<script>
+"use strict";
+const PLAYER_NAME = "Lucas";
+
+// ===================== Sound and speech (all generated in code; nothing starts before the first tap) =====================
+const Sound = (function () {
+  let ctx = null, master = null, tuneBus = null, muted = false, unlocked = false;
+  let tuneNext = 0, tuneBar = 0;
+  const midi = m => 440 * Math.pow(2, (m - 69) / 12);
+
+  function ready() { return unlocked && !muted && !!ctx; }
+  function master_() {
+    if (!master) { master = ctx.createGain(); master.gain.value = 0.5; master.connect(ctx.destination); }
+    return master;
+  }
+  function tune_() {
+    if (!tuneBus) { tuneBus = ctx.createGain(); tuneBus.gain.value = 0.7; tuneBus.connect(master_()); }
+    return tuneBus;
+  }
+
+  // One enveloped oscillator: { type, f0, f1, delay, dur, vol, attack, lp, wobble, bus }.
+  function tone(o) {
+    if (!ready()) return;
+    try {
+      const t = ctx.currentTime + (o.delay || 0) + 0.01;
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = o.type || "sine";
+      osc.frequency.setValueAtTime(o.f0, t);
+      if (o.f1) osc.frequency.exponentialRampToValueAtTime(o.f1, t + o.dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(o.vol, t + (o.attack || 0.01));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+      if (o.lp) {
+        const f = ctx.createBiquadFilter();
+        f.type = "lowpass"; f.frequency.value = o.lp;
+        osc.connect(f); f.connect(g);
+      } else osc.connect(g);
+      g.connect(o.bus ? tune_() : master_());
+      if (o.wobble) { // a gentle shiver on the volume: a silly rumble rather than a scary one
+        const lfo = ctx.createOscillator(), lg = ctx.createGain();
+        lfo.frequency.value = o.wobble; lg.gain.value = o.vol * 0.4;
+        lfo.connect(lg); lg.connect(g.gain);
+        lfo.start(t); lfo.stop(t + o.dur + 0.05);
+      }
+      osc.start(t); osc.stop(t + o.dur + 0.05);
+    } catch (e) { /* audio is a bonus; never break the game */ }
+  }
+
+  // The finale dance tune: C major, eighth notes at 150 bpm, four bars (6.4 s) then round again.
+  const MELODY = [
+    [72, 76, 79, 76, 72, 76, 79, 0], [69, 72, 77, 72, 67, 71, 74, 0],
+    [72, 76, 79, 76, 72, 76, 79, 84], [77, 81, 84, 81, 79, 76, 74, 0]
+  ];
+  const BASS = [48, 53, 48, 55]; // C F C G
+  const STEP = 0.2;
+
+  return {
+    unlock() {
+      if (unlocked) return;
+      unlocked = true;
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) {
+          ctx = new AC();
+          if (ctx.resume) ctx.resume();
+          const o = ctx.createOscillator(), g = ctx.createGain(); // silent blip: wakes iOS audio inside the tap
+          g.gain.value = 0; o.connect(g); g.connect(ctx.destination);
+          o.start(); o.stop(ctx.currentTime + 0.02);
+        }
+      } catch (e) { ctx = null; }
+      try { // a silent utterance inside the tap lets iOS speak later lines on its own
+        const U = window.SpeechSynthesisUtterance, s = window.speechSynthesis;
+        if (U && s && !muted) { const u = new U(""); u.volume = 0; s.speak(u); }
+      } catch (e) { /* no speech here */ }
+    },
+    isUnlocked() { return unlocked; },
+    setMuted(m) {
+      muted = !!m;
+      if (muted) {
+        Speech.cancel();
+        try { if (master) master.disconnect(); } catch (e) { /* ignore */ }
+        master = null; tuneBus = null; tuneNext = 0; // sounds already queued go to a dead end
+      } else if (ctx) {
+        try { if (ctx.resume) ctx.resume(); } catch (e) { /* ignore */ }
+      }
+    },
+    isMuted() { return muted; },
+
+    boing() {
+      tone({ type: "sine", f0: 300, f1: 660, dur: 0.11, vol: 0.22 });
+      tone({ type: "sine", f0: 660, f1: 430, delay: 0.09, dur: 0.1, vol: 0.12 });
+    },
+    thud() { tone({ type: "sine", f0: 130, f1: 50, dur: 0.15, vol: 0.4 }); },
+    growl(d) { // louder the closer the nearest zombie is (d = 1..4)
+      tone({ type: "sawtooth", f0: 88, f1: 58, dur: 0.42, vol: 0.05 + (5 - d) * 0.03, attack: 0.06, lp: 260, wobble: 14 });
+    },
+    bonk() {
+      tone({ type: "sine", f0: 520, f1: 150, dur: 0.17, vol: 0.32 });
+      tone({ type: "triangle", f0: 1000, f1: 320, dur: 0.06, vol: 0.14 });
+    },
+    groan() { tone({ type: "sawtooth", f0: 150, f1: 70, delay: 0.2, dur: 0.8, vol: 0.14, attack: 0.15, lp: 380, wobble: 6 }); },
+    munch(i) {
+      const f = 200 + (i % 3) * 30;
+      tone({ type: "triangle", f0: f, f1: f * 0.6, dur: 0.09, vol: 0.28, lp: 700 });
+      tone({ type: "triangle", f0: f * 0.9, f1: f * 0.55, delay: 0.14, dur: 0.09, vol: 0.24, lp: 700 });
+    },
+    // Called every tick during the finale: queues the next bar shortly before the last one ends.
+    tuneUpdate() {
+      if (!ready()) { tuneNext = 0; return; }
+      if (ctx.currentTime < tuneNext - 0.3) return;
+      const base = Math.max(tuneNext, ctx.currentTime + 0.03) - ctx.currentTime;
+      const bar = tuneBar % MELODY.length;
+      MELODY[bar].forEach((m, i) => {
+        if (m) tone({ type: "triangle", f0: midi(m), delay: base + i * STEP, dur: 0.17, vol: 0.2, bus: true });
+      });
+      for (let b = 0; b < 4; b++) {
+        tone({ type: "square", f0: midi(BASS[bar]) * (b % 2 ? 1.5 : 1), delay: base + b * STEP * 2, dur: 0.3, vol: 0.07, lp: 500, bus: true });
+      }
+      tuneBar++;
+      tuneNext = ctx.currentTime + base + MELODY[0].length * STEP;
+    },
+    stopTune() {
+      tuneNext = 0; tuneBar = 0;
+      try { if (tuneBus) tuneBus.disconnect(); } catch (e) { /* ignore */ }
+      tuneBus = null;
+    }
+  };
+})();
+
+const Speech = (function () {
+  let now = 0, busyUntil = 0, hardUntil = 0, serial = 0;
+  const synth = () => { try { return window.speechSynthesis || null; } catch (e) { return null; } };
+  // Busy = we estimate a line is still going, or the browser says so (but only for a short grace: never trust a stuck flag forever).
+  function busy() {
+    if (now < busyUntil) return true;
+    const s = synth();
+    try { return !!(s && s.speaking && now < hardUntil); } catch (e) { return false; }
+  }
+  return {
+    tick(t) { now = t; },
+    cancel() {
+      busyUntil = hardUntil = 0; serial++;
+      try { const s = synth(); if (s) s.cancel(); } catch (e) { /* ignore */ }
+    },
+    // Says a line unless one is still going. Never queues, never waits for onend. Returns true if it was started.
+    say(text, opts) {
+      if (!Sound.isUnlocked() || Sound.isMuted()) return false;
+      const s = synth(), U = window.SpeechSynthesisUtterance;
+      if (!s || !U || busy()) return false;
+      try {
+        const zombie = !!(opts && opts.zombie);
+        const u = new U(text);
+        u.rate = zombie ? 0.75 : 0.85; u.pitch = zombie ? 0.4 : 1.1; u.volume = 1; u.lang = "en-US";
+        const id = ++serial;
+        const done = () => { if (id === serial) busyUntil = hardUntil = 0; };
+        u.onend = done; u.onerror = done;
+        busyUntil = now + 800 + text.length * 80;
+        hardUntil = busyUntil + 2000;
+        s.speak(u);
+        return true;
+      } catch (e) { busyUntil = hardUntil = 0; return false; }
+    }
+  };
+})();
+
+// ===================== Engine (no DOM access in this section) =====================
+const BZ = (function () {
+  const N = 12;
+  const TIMING = {
+    zombieStepMs: 1200, startFreezeMs: 2000, hopMs: 150, minHopGapMs: 200,
+    kickMs: 1500, koMs: 5000, invincibleMs: 1500, dinnerMs: 9000, finaleMs: 18000, maxDtMs: 100
+  };
+  const ZOMBIE_COUNTS = [2, 3, 4, 5, 7, 9, 12, 20];
+
+  // Diamond view: screen x ~ c - r, screen y ~ c + r.
+  const SCREEN_TO_GRID = {
+    up: { dc: -1, dr: -1 }, down: { dc: 1, dr: 1 },
+    left: { dc: -1, dr: 1 }, right: { dc: 1, dr: -1 },
+    upRight: { dc: 0, dr: -1 }, upLeft: { dc: -1, dr: 0 },
+    downRight: { dc: 1, dr: 0 }, downLeft: { dc: 0, dr: 1 }
+  };
+  // Screen angle (0 = right, PI/2 = down) of each key, in 45-degree steps.
+  const DIR_BY_OCTANT = ["right", "downRight", "down", "downLeft", "left", "upLeft", "up", "upRight"];
+
+  function angleToScreenDir(rad) {
+    const oct = Math.round(rad / (Math.PI / 4));
+    return DIR_BY_OCTANT[((oct % 8) + 8) % 8];
+  }
+
+  // Seeded PRNG (mulberry32), same as maze_game.html.
+  function makeRng(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  const state = {
+    phase: "start",
+    boardIndex: 0,
+    time: 0,
+    board: { obstacles: new Map(), hole: { c: -1, r: -1 } },
+    bunny: { c: 0, r: 0, fromC: 0, fromR: 0, hopStart: -Infinity, invincibleUntil: 0 },
+    zombies: [],
+    sceneEndAt: null // simulated time when the dinner / finale scene ends (null otherwise)
+  };
+
+  const listeners = {};
+  function on(event, fn) { (listeners[event] = listeners[event] || []).push(fn); }
+  function emit(event, data) {
+    (listeners[event] || []).slice().forEach(fn => fn(data));
+  }
+
+  function setPhase(phase) {
+    state.phase = phase;
+    state.sceneEndAt = null; // every phase change cancels any pending scene timer
+    emit("phase", { phase, boardIndex: state.boardIndex });
+  }
+
+  // The bunny reached the hole: dinner on boards 1-7, the dance finale on board 8.
+  function onWin() {
+    emit("win");
+    const last = state.boardIndex >= ZOMBIE_COUNTS.length - 1;
+    setPhase(last ? "finale" : "dinner");
+    state.sceneEndAt = state.time + (last ? TIMING.finaleMs : TIMING.dinnerMs);
+  }
+
+  function setBoard(board, bunnyStart, zombieStarts) {
+    state.board = board;
+    state.time = 0;
+    state.bunny = {
+      c: bunnyStart.c, r: bunnyStart.r, fromC: bunnyStart.c, fromR: bunnyStart.r,
+      hopStart: -Infinity, invincibleUntil: 0
+    };
+    state.zombies = zombieStarts.map((z, i) => ({
+      id: i, c: z.c, r: z.r, fromC: z.c, fromR: z.r,
+      stepStart: -Infinity, nextStepAt: TIMING.startFreezeMs + rng() * STAGGER_MS, koUntil: 0, ko: false
+    }));
+    kick = null;
+    setPhase("play");
+  }
+
+  function canBunnyEnter(c, r) {
+    if (c < 0 || r < 0 || c >= N || r >= N) return false;
+    if (state.board.obstacles.has(c + "," + r)) return false;
+    for (const z of state.zombies) {
+      if (z.koUntil <= state.time && z.c === c && z.r === r) return false;
+    }
+    return true;
+  }
+
+  function tryHop(dirKey) {
+    if (state.phase !== "play") return false;
+    const d = SCREEN_TO_GRID[dirKey];
+    if (!d) return false;
+    const b = state.bunny;
+    if (state.time < b.hopStart + TIMING.minHopGapMs) return false;
+    const c = b.c + d.dc, r = b.r + d.dr;
+    if (!canBunnyEnter(c, r)) {
+      emit("blocked", { c, r });
+      return false;
+    }
+    b.fromC = b.c; b.fromR = b.r;
+    b.c = c; b.r = r;
+    b.hopStart = state.time;
+    emit("hop", { c, r });
+    const hole = state.board.hole;
+    if (c === hole.c && r === hole.r) onWin();
+    return true;
+  }
+
+  // ---- Zombies ----
+  const DIRS4 = [{ dc: 0, dr: -1 }, { dc: 1, dr: 0 }, { dc: 0, dr: 1 }, { dc: -1, dr: 0 }];
+  const WOBBLE_CHANCE = 0.1;
+  const STAGGER_MS = 1200;
+  const STEP_JITTER = 0.25;
+
+  function isActive(z) { return z.koUntil <= state.time; }
+  function inBounds(c, r) { return c >= 0 && r >= 0 && c < N && r < N; }
+  function stepInterval() {
+    return TIMING.zombieStepMs * (1 + (rng() * 2 - 1) * STEP_JITTER);
+  }
+
+  // Squares a zombie may stand on: on the board, no obstacle, not the hole, no other active zombie.
+  function zombieCanStand(z, c, r) {
+    if (!inBounds(c, r) || state.board.obstacles.has(c + "," + r)) return false;
+    const hole = state.board.hole;
+    if (c === hole.c && r === hole.r) return false;
+    for (const o of state.zombies) {
+      if (o !== z && isActive(o) && o.c === c && o.r === r) return false;
+    }
+    return true;
+  }
+
+  // Shortest 4-direction path (BFS) to the bunny's claimed square; returns the first step.
+  function pathStep(z) {
+    const goal = state.bunny;
+    const key = (c, r) => r * N + c;
+    const first = new Map();
+    const queue = [];
+    for (const d of DIRS4) {
+      const c = z.c + d.dc, r = z.r + d.dr;
+      if (c === goal.c && r === goal.r) return { c, r };
+      if (zombieCanStand(z, c, r)) { first.set(key(c, r), { c, r }); queue.push({ c, r }); }
+    }
+    for (let i = 0; i < queue.length; i++) {
+      const cur = queue[i];
+      const start = first.get(key(cur.c, cur.r));
+      for (const d of DIRS4) {
+        const c = cur.c + d.dc, r = cur.r + d.dr;
+        if (c === goal.c && r === goal.r) return start;
+        if (first.has(key(c, r)) || (c === z.c && r === z.r) || !zombieCanStand(z, c, r)) continue;
+        first.set(key(c, r), start);
+        queue.push({ c, r });
+      }
+    }
+    return null;
+  }
+
+  function zombieNextStep(z) {
+    if (rng() < WOBBLE_CHANCE) {
+      // Wobble: pause to groan, or take a random legal step.
+      if (rng() < 0.5) return null;
+      const options = DIRS4.map(d => ({ c: z.c + d.dc, r: z.r + d.dr }))
+        .filter(p => zombieCanStand(z, p.c, p.r) && !(p.c === state.bunny.c && p.r === state.bunny.r));
+      return options.length ? options[Math.floor(rng() * options.length)] : null;
+    }
+    return pathStep(z);
+  }
+
+  function nearestZombieDistance() {
+    let best = Infinity;
+    for (const z of state.zombies) {
+      if (isActive(z)) best = Math.min(best, Math.abs(z.c - state.bunny.c) + Math.abs(z.r - state.bunny.r));
+    }
+    return best;
+  }
+
+  let kick = null; // { zombieId, endAt } while phase === "kick"
+
+  function chebyshev(c, r, hole) { return Math.max(Math.abs(c - hole.c), Math.abs(r - hole.r)); }
+
+  function victoryHop() {
+    const b = state.bunny, hole = state.board.hole;
+    const here = chebyshev(b.c, b.r, hole);
+    let safe = null, any = null;
+    for (let dc = -1; dc <= 1; dc++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        const c = b.c + dc, r = b.r + dr;
+        if (!(dc || dr) || !inBounds(c, r) || state.board.obstacles.has(c + "," + r)) continue;
+        if (state.zombies.some(z => z.c === c && z.r === r)) continue;
+        const dist = chebyshev(c, r, hole);
+        if (dist >= here) continue;
+        const cand = { c, r, dist };
+        if (!any || dist < any.dist) any = cand;
+        const nearActive = state.zombies.some(z => isActive(z) && Math.max(Math.abs(z.c - c), Math.abs(z.r - r)) <= 1);
+        if (!nearActive && (!safe || dist < safe.dist)) safe = cand;
+      }
+    }
+    const pick = safe || any;
+    if (pick) {
+      b.fromC = b.c; b.fromR = b.r;
+      b.c = pick.c; b.r = pick.r;
+      b.hopStart = state.time;
+    }
+    b.invincibleUntil = state.time + TIMING.invincibleMs;
+    emit("victory-hop", { c: b.c, r: b.r });
+    if (pick && b.c === hole.c && b.r === hole.r) onWin();
+  }
+
+  function finishKick() {
+    const z = state.zombies[kick.zombieId];
+    kick = null;
+    z.koUntil = state.time + TIMING.koMs;
+    z.ko = true;
+    for (const o of state.zombies) o.nextStepAt += TIMING.kickMs; // the freeze delays everyone's schedule
+    emit("kick", { zombieId: z.id });
+    setPhase("play"); // back to play first, so a win during the victory hop ends in dinner/finale
+    victoryHop();
+  }
+
+  function wakeZombies() {
+    for (const z of state.zombies) {
+      if (!z.ko || state.time < z.koUntil) continue;
+      const b = state.bunny;
+      const occupied = (b.c === z.c && b.r === z.r) ||
+        state.zombies.some(o => o !== z && isActive(o) && o.c === z.c && o.r === z.r);
+      if (occupied) { z.koUntil = state.time + TIMING.maxDtMs; continue; } // wait until the square is free
+      z.ko = false;
+      z.nextStepAt = state.time + stepInterval();
+      emit("ko-wake", { zombieId: z.id });
+    }
+  }
+
+  function stepZombies() {
+    if (state.time < TIMING.startFreezeMs) return;
+    for (const z of state.zombies) {
+      if (state.phase !== "play") return;
+      if (!isActive(z) || state.time < z.nextStepAt) continue;
+      z.nextStepAt = state.time + stepInterval();
+      const step = zombieNextStep(z);
+      if (!step) continue;
+      const b = state.bunny;
+      if (step.c === b.c && step.r === b.r) {
+        if (state.time < b.invincibleUntil) continue; // can't catch yet
+        kick = { zombieId: z.id, endAt: state.time + TIMING.kickMs };
+        setPhase("kick");
+        emit("catch", { zombieId: z.id });
+        return;
+      }
+      z.fromC = z.c; z.fromR = z.r;
+      z.c = step.c; z.r = step.r;
+      z.stepStart = state.time;
+    }
+  }
+
+  function tick(dtMs) {
+    state.time += Math.min(Math.max(dtMs, 0), TIMING.maxDtMs);
+    if (state.phase === "dinner") {
+      if (state.sceneEndAt !== null && state.time >= state.sceneEndAt) nextBoard();
+      return;
+    }
+    if (state.phase !== "play" && state.phase !== "kick") return; // start, finale: nothing moves
+    wakeZombies();
+    if (state.phase === "kick") {
+      if (kick && state.time >= kick.endAt) finishKick();
+    } else if (state.phase === "play") {
+      stepZombies();
+    }
+  }
+
+  // ---- Boards ----
+  // Generated in a canonical frame (bunny top-left, hole bottom-right, vertical walls with one gap each,
+  // so the bunny must zig-zag), then randomly flipped / transposed. Retries with the seeded rng until valid.
+  const BOARD_WALLS = [1, 2, 2, 2, 3, 2, 3, 2];
+  const BOARD_SCATTER = [3, 4, 5, 6, 6, 8, 6, 4];
+  const OBSTACLE_KINDS = ["rock", "bush", "tree"];
+  const PATH_RATIO = 1.5;
+
+  // 8-direction shortest path length (obstacles block), or -1.
+  function shortestPath8(board, from, to) {
+    const dist = new Map([[from.c + "," + from.r, 0]]);
+    const queue = [from];
+    for (let i = 0; i < queue.length; i++) {
+      const cur = queue[i], d = dist.get(cur.c + "," + cur.r);
+      if (cur.c === to.c && cur.r === to.r) return d;
+      for (let dc = -1; dc <= 1; dc++) {
+        for (let dr = -1; dr <= 1; dr++) {
+          const c = cur.c + dc, r = cur.r + dr, k = c + "," + r;
+          if (!(dc || dr) || !inBounds(c, r) || board.obstacles.has(k) || dist.has(k)) continue;
+          dist.set(k, d + 1);
+          queue.push({ c, r });
+        }
+      }
+    }
+    return -1;
+  }
+
+  function validateBoard(b, index) {
+    const reasons = [];
+    const { board, bunnyStart, zombieStarts } = b;
+    const hole = board.hole;
+    if (zombieStarts.length !== ZOMBIE_COUNTS[index]) {
+      reasons.push("needs " + ZOMBIE_COUNTS[index] + " zombies, has " + zombieStarts.length);
+    }
+    const minDist = index === 7 ? 3 : 4;
+    const taken = new Set();
+    function claim(c, r, what) {
+      const k = c + "," + r;
+      if (!inBounds(c, r)) reasons.push(what + " is off the board");
+      if (taken.has(k)) reasons.push(what + " shares square " + k);
+      taken.add(k);
+    }
+    for (const k of board.obstacles.keys()) taken.add(k);
+    claim(hole.c, hole.r, "hole");
+    claim(bunnyStart.c, bunnyStart.r, "bunny");
+    zombieStarts.forEach((z, i) => {
+      claim(z.c, z.r, "zombie " + i);
+      if (chebyshev(z.c, z.r, bunnyStart) < minDist) reasons.push("zombie " + i + " is too close to the bunny");
+    });
+    let free = 0;
+    for (let dc = -1; dc <= 1; dc++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        const c = bunnyStart.c + dc, r = bunnyStart.r + dr;
+        if ((dc || dr) && inBounds(c, r) && !board.obstacles.has(c + "," + r) &&
+            !zombieStarts.some(z => z.c === c && z.r === r)) free++;
+      }
+    }
+    if (free < 3) reasons.push("bunny has only " + free + " free neighbours");
+    const len = shortestPath8(board, bunnyStart, hole);
+    if (len < 0) reasons.push("no path from the bunny to the hole");
+    else if (len < PATH_RATIO * chebyshev(bunnyStart.c, bunnyStart.r, hole)) {
+      reasons.push("path " + len + " is shorter than " + PATH_RATIO + "x the straight distance");
+    }
+    return { ok: reasons.length === 0, reasons };
+  }
+
+  function buildBoardAttempt(index, rng) {
+    const pick = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+    const obstacles = new Map();
+    const noScatter = new Set();
+    const bunny = { c: pick(1, 2), r: pick(1, 2) };
+    const hole = { c: pick(9, 10), r: pick(9, 10) };
+    // wall columns between the bunny and the hole, at least 2 apart
+    const cols = [];
+    for (let tries = 0; cols.length < BOARD_WALLS[index] && tries < 50; tries++) {
+      const c = pick(3, 8);
+      if (cols.every(o => Math.abs(o - c) >= 2)) cols.push(c);
+    }
+    cols.sort((a, b) => a - b);
+    let low = rng() < 0.5; // which end the first gap is on; they alternate
+    for (const c of cols) {
+      const gap = low ? pick(9, 11) : pick(0, 2);
+      low = !low;
+      for (let r = 0; r < N; r++) {
+        if (r === gap) { for (let d = -1; d <= 1; d++) noScatter.add(c + "," + (gap + d)); continue; }
+        obstacles.set(c + "," + r, OBSTACLE_KINDS[pick(0, 2)]);
+      }
+    }
+    for (let dc = -1; dc <= 1; dc++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        noScatter.add((bunny.c + dc) + "," + (bunny.r + dr));
+        noScatter.add((hole.c + dc) + "," + (hole.r + dr));
+      }
+    }
+    for (let n = 0, tries = 0; n < BOARD_SCATTER[index] && tries < 200; tries++) {
+      const k = pick(0, N - 1) + "," + pick(0, N - 1);
+      if (obstacles.has(k) || noScatter.has(k)) continue;
+      obstacles.set(k, OBSTACLE_KINDS[pick(0, 2)]);
+      n++;
+    }
+    // zombies: on squares the bunny's side can walk to (4-direction), at least 4 squares away
+    const seen = new Set([bunny.c + "," + bunny.r]);
+    const queue = [bunny];
+    for (let i = 0; i < queue.length; i++) {
+      for (const d of DIRS4) {
+        const c = queue[i].c + d.dc, r = queue[i].r + d.dr, k = c + "," + r;
+        if (!inBounds(c, r) || obstacles.has(k) || seen.has(k) || (c === hole.c && r === hole.r)) continue;
+        seen.add(k);
+        queue.push({ c, r });
+      }
+    }
+    const spots = queue.slice(1).filter(p => chebyshev(p.c, p.r, bunny) >= 4);
+    for (let i = spots.length - 1; i > 0; i--) { // seeded shuffle
+      const j = Math.floor(rng() * (i + 1));
+      const t = spots[i]; spots[i] = spots[j]; spots[j] = t;
+    }
+    let zombies = spots.slice(0, ZOMBIE_COUNTS[index]);
+    // random mirror / transpose so the layouts differ
+    const flipC = rng() < 0.5, flipR = rng() < 0.5, swap = rng() < 0.5;
+    const tf = p => {
+      let c = flipC ? N - 1 - p.c : p.c, r = flipR ? N - 1 - p.r : p.r;
+      if (swap) { const t = c; c = r; r = t; }
+      return { c, r };
+    };
+    const outObs = new Map();
+    for (const [k, kind] of obstacles) {
+      const [c, r] = k.split(",").map(Number);
+      const p = tf({ c, r });
+      outObs.set(p.c + "," + p.r, kind);
+    }
+    return {
+      board: { obstacles: outObs, hole: tf(hole) },
+      bunnyStart: tf(bunny),
+      zombieStarts: zombies.map(tf)
+    };
+  }
+
+  function makeBoard(index, rngFn) {
+    let result = null;
+    for (let attempt = 0; attempt < 500; attempt++) {
+      result = buildBoardAttempt(index, rngFn);
+      if (validateBoard(result, index).ok) break;
+    }
+    return result;
+  }
+
+  // ---- Phase flow ----
+  function loadBoard(index) {
+    state.boardIndex = index;
+    const b = makeBoard(index, rng);
+    setBoard(b.board, b.bunnyStart, b.zombieStarts);
+  }
+  function startGame(seed) {
+    if (seed !== undefined && seed !== null && !isNaN(Number(seed))) rng = makeRng(Number(seed));
+    loadBoard(0);
+  }
+  function nextBoard() { loadBoard(Math.min(state.boardIndex + 1, ZOMBIE_COUNTS.length - 1)); }
+  function skipScene() { if (state.phase === "dinner") nextBoard(); }
+  function playAgain() { if (state.phase === "finale") loadBoard(0); }
+
+  const params = new URLSearchParams(location.search);
+  const manual = params.has("manual");
+  const seedParam = params.get("seed");
+  let rng = makeRng(seedParam !== null && seedParam !== "" && !isNaN(Number(seedParam))
+    ? Number(seedParam) : Date.now());
+
+  return {
+    N, TIMING, ZOMBIE_COUNTS, SCREEN_TO_GRID, angleToScreenDir, makeRng,
+    state, setBoard, canBunnyEnter, tryHop, tick, on, emit, manual, rng: () => rng(),
+    zombieNextStep, nearestZombieDistance,
+    makeBoard, validateBoard, startGame, nextBoard, skipScene, playAgain
+  };
+})();
+window.BZ = BZ;
+
+// ===================== View: canvas rendering, scenes and layout =====================
+// Diamond isometric board. Cell (c, r) centre: x = ox + (c - r) * T/2, y = oy + (c + r + 1) * T/4,
+// where T is the tile width and (ox, oy) the board's top corner, in canvas CSS px.
+// BZ.view.cellToScreen / screenToCell use viewport (client) CSS px, so they match pointer events.
+BZ.view = (function () {
+  const N = BZ.N, S = BZ.state, TM = BZ.TIMING, TAU = Math.PI * 2;
+  const canvas = document.getElementById("board");
+  const g = canvas.getContext("2d");
+  const startEl = document.getElementById("start"), titleEl = startEl.querySelector("h1");
+  const tapEl = document.getElementById("tap-to-play"), againEl = document.getElementById("play-again");
+  const labelEl = document.getElementById("board-label");
+  const HEAD = 1.45, EARTH = 0.55, PAD = 8; // room above the board (tall things on the back row) and below it (earth edge)
+  const L = { key: "", left: 0, top: 0, w: 1, h: 1, dpr: 1, T: 1, ox: 0, oy: 0 };
+  const groundCv = document.createElement("canvas"), gg = groundCv.getContext("2d");
+  let groundKey = "", groundBoard = null, obstacles = [];
+  let glowCell = null; // {c, r} or null: set by the input section while a finger is held
+  const anim = { kick: null, fallF: new Map(), wakeAt: new Map(), faceZ: new Map(), bunnyF: 1 };
+
+  // ---------- small helpers ----------
+  const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const ease = t => t * t * (3 - 2 * t);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function hash(a, b) { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); }
+  function ell(c, x, y, rx, ry, rot) { c.beginPath(); c.ellipse(x, y, Math.max(rx, 0.001), Math.max(ry, 0.001), rot || 0, 0, TAU); }
+  function circ(c, x, y, r) { c.beginPath(); c.arc(x, y, Math.max(r, 0.001), 0, TAU); }
+  function rrect(c, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    c.beginPath(); c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+  }
+  function poly(c, pts) { c.beginPath(); c.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]); c.closePath(); }
+  function paint(c, fill, stroke, lw) { c.fillStyle = fill; c.fill(); if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw; c.stroke(); } }
+  function blobs(c, list) { // one path of separate circles (no joining lines)
+    c.beginPath();
+    for (const [x, y, r] of list) { c.moveTo(x + r, y); c.arc(x, y, r, 0, TAU); }
+  }
+  function twinkle(c, x, y, r) { // a 4-point sparkle
+    c.beginPath();
+    for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4, rr = i % 2 ? r * 0.28 : r; c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+    c.closePath(); paint(c, "#ffffff", "rgba(120,200,255,0.8)", Math.max(1, r * 0.12));
+  }
+  function star(c, x, y, r, rot, fill, stroke) {
+    c.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = rot + i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? r * 0.45 : r;
+      c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    c.closePath(); paint(c, fill, stroke, Math.max(1, r * 0.15));
+  }
+
+  // ---------- layout ----------
+  function layout() {
+    const b = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const key = b.left + "," + b.top + "," + b.width + "," + b.height + "," + dpr;
+    if (key === L.key) return;
+    L.key = key; L.left = b.left; L.top = b.top; L.w = Math.max(1, b.width); L.h = Math.max(1, b.height); L.dpr = dpr;
+    canvas.width = Math.round(L.w * dpr); canvas.height = Math.round(L.h * dpr);
+    const rows = N / 2 + HEAD + EARTH; // board height in tiles
+    L.T = Math.max(1, Math.min((L.w - 2 * PAD) / N, (L.h - 2 * PAD) / rows));
+    L.ox = L.w / 2;
+    L.oy = (L.h - L.T * rows) / 2 + HEAD * L.T;
+    groundKey = "";
+  }
+  function P(c, r) { return { x: L.ox + (c - r) * L.T / 2, y: L.oy + (c + r + 1) * L.T / 4 }; }
+  function cellToScreen(c, r) { layout(); const p = P(c, r); return { x: p.x + L.left, y: p.y + L.top }; }
+  function screenToCell(x, y) {
+    layout();
+    const u = (x - L.left - L.ox) / (L.T / 2), v = (y - L.top - L.oy) / (L.T / 4) - 1;
+    const c = Math.round((u + v) / 2), r = Math.round((v - u) / 2);
+    return c >= 0 && r >= 0 && c < N && r < N ? { c, r } : null;
+  }
+
+  // ---------- characters (unit coordinates: feet at 0,0, facing +x, height about 1) ----------
+  const BUNNY = { body: "#c8b49e", dark: "#a8927c", head: "#d6c4b0", belly: "#f1e7da", ear: "#f4b6c2" };
+  const DAD = { body: "#a8937e", dark: "#8c7764", head: "#b9a590", belly: "#e8dccd", ear: "#eea6b4" };
+  const MOM = { body: "#dac8b4", dark: "#c0aa90", head: "#e7d7c5", belly: "#f8f0e5", ear: "#f6b8c6" };
+  const BABY = { body: "#ebdfd2", dark: "#d4c4b2", head: "#f3e9de", belly: "#fffaf3", ear: "#f8c0cc" };
+
+  // o: { f facing ±1, lift px, col, kick 0..1, wave angle, happy, munch, carrot, bow, tie, seed, scale }
+  function drawBunny(c, x, y, s, o) {
+    o = o || {};
+    const col = o.col || BUNNY, t = S.time, line = "rgba(92,68,48,0.5)", lw = Math.max(0.022, 1 / s);
+    c.save();
+    c.translate(x, y - (o.lift || 0));
+    c.scale((o.f || 1) * s, s);
+    const wig = Math.sin(t / 260 + (o.seed || 0)) * 0.06;
+    // back ear, back foot, body, tail
+    ell(c, 0.0, -0.8, 0.062, 0.21, -0.3 + wig); paint(c, col.dark, line, lw);
+    ell(c, 0.0, -0.79, 0.028, 0.15, -0.3 + wig); paint(c, col.ear);
+    ell(c, -0.1, -0.04, 0.14, 0.06); paint(c, col.dark, line, lw);
+    ell(c, -0.03, -0.25, 0.25, 0.21); paint(c, col.body, line, lw);
+    circ(c, -0.26, -0.27, 0.09); paint(c, "#ffffff", "rgba(150,140,130,0.6)", lw);
+    circ(c, -0.29, -0.3, 0.035); paint(c, "#f4f0ea");
+    ell(c, 0.07, -0.2, 0.13, 0.14); paint(c, col.belly);
+    if (o.kick) { // hind leg kicking forward and up
+      c.save(); c.translate(0.0, -0.12); c.rotate(-0.95 * o.kick);
+      ell(c, 0.2, 0, 0.21, 0.065); paint(c, col.dark, line, lw);
+      ell(c, 0.4, 0, 0.06, 0.075); paint(c, col.ear);
+      c.restore();
+    } else {
+      ell(c, 0.15, -0.035, 0.1, 0.05); paint(c, col.dark, line, lw);
+    }
+    // head
+    circ(c, 0.11, -0.5, 0.165); paint(c, col.head, line, lw);
+    if (o.tie) { poly(c, [0.1, -0.34, 0.0, -0.39, 0.0, -0.29]); paint(c, "#4ecdc4"); poly(c, [0.1, -0.34, 0.2, -0.39, 0.2, -0.29]); paint(c, "#4ecdc4"); circ(c, 0.1, -0.34, 0.025); paint(c, "#2fa59d"); }
+    // front ear
+    ell(c, 0.12, -0.81, 0.064, 0.21, 0.12 + wig * 0.6); paint(c, col.dark, line, lw);
+    ell(c, 0.12, -0.8, 0.03, 0.15, 0.12 + wig * 0.6); paint(c, col.ear);
+    if (o.bow) { poly(c, [0.07, -0.66, -0.04, -0.72, -0.04, -0.6]); paint(c, "#ff6fa5"); poly(c, [0.07, -0.66, 0.18, -0.72, 0.18, -0.6]); paint(c, "#ff6fa5"); circ(c, 0.07, -0.66, 0.025); paint(c, "#e64d8a"); }
+    // face
+    if (o.happy) {
+      c.beginPath(); c.arc(0.17, -0.52, 0.03, Math.PI * 1.1, Math.PI * 1.9); c.strokeStyle = "#3a2e26"; c.lineWidth = Math.max(0.02, 1.2 / s); c.stroke();
+    } else {
+      circ(c, 0.175, -0.53, 0.034); paint(c, "#2e2420");
+      circ(c, 0.185, -0.542, 0.012); paint(c, "#ffffff");
+    }
+    circ(c, 0.15, -0.44, 0.04); paint(c, "rgba(255,140,160,0.35)");
+    circ(c, 0.268, -0.47, 0.024); paint(c, "#f08ca0");
+    const m = o.munch ? 0.012 + Math.abs(Math.sin(t / 110)) * 0.02 : 0;
+    if (m) { ell(c, 0.24, -0.41, 0.022, m); paint(c, "#7a3a3a"); }
+    else { c.beginPath(); c.moveTo(0.21, -0.42); c.quadraticCurveTo(0.235, -0.4, 0.26, -0.425); c.strokeStyle = "#7a5a4a"; c.lineWidth = Math.max(0.015, 1 / s); c.stroke(); }
+    if (o.carrot) {
+      c.save(); c.translate(0.3, -0.38); c.rotate(-0.5 + Math.sin(t / 110) * 0.08);
+      poly(c, [0, -0.035, 0.17, 0, 0, 0.035]); paint(c, "#f28c28");
+      poly(c, [0, 0, -0.07, -0.05, -0.05, 0.0, -0.07, 0.05]); paint(c, "#5cb85c");
+      c.restore();
+    }
+    if (o.wave !== undefined) { // a raised front paw
+      c.save(); c.translate(0.16, -0.3); c.rotate(o.wave);
+      ell(c, 0, -0.14, 0.055, 0.15); paint(c, col.head, line, lw);
+      circ(c, 0, -0.27, 0.025); paint(c, col.ear);
+      c.restore();
+    }
+    c.restore();
+  }
+
+  const LIE_SHRINK = 0.25; // a zombie lying down is drawn a bit smaller so it stays on its own square
+  const ZC = { skin: "#86b86c", skinDark: "#6c9c58", shirt: "#8a6a4a", shirtDark: "#6d5238", pants: "#4a4560", pantsDark: "#3c3850", shoe: "#5a4636", hair: "#4f6e3f" };
+  function zArm(c, sx, sy, a, skin, lw, line) {
+    c.save(); c.translate(sx, sy); c.rotate(a || 0);
+    rrect(c, 0.08, -0.04, 0.28, 0.08, 0.04); paint(c, skin, line, lw);
+    poly(c, [-0.05, -0.06, 0.14, -0.06, 0.12, -0.02, 0.16, 0.01, 0.12, 0.06, -0.05, 0.06]); paint(c, ZC.shirt, line, lw); // ragged sleeve
+    circ(c, 0.38, 0, 0.055); paint(c, skin, line, lw);
+    ell(c, 0.43, -0.03, 0.03, 0.016, -0.3); paint(c, skin);
+    ell(c, 0.44, 0.015, 0.03, 0.016, 0.2); paint(c, skin);
+    c.restore();
+  }
+  // o: { f, lift px, tilt rad, fall 0..1 (lying on its back), walk phase, armF, armB, open (mouth), dizzy }
+  // The body (legs, shirt, head, face) is cached as a small sprite per size / leg step / face; the arms stay vector.
+  const ZLINE = "rgba(40,48,30,0.5)";
+  const zSprites = new Map();
+  // With arms = true the arms are baked in at their resting angles (the usual shuffle on the board).
+  function zBodySprite(s, walkStep, dizzy, open, arms) {
+    const key = Math.round(s * 4) + "|" + L.dpr + "|" + walkStep + "|" + (dizzy ? 1 : 0) + (open ? 1 : 0) + (arms ? 1 : 0);
+    let spr = zSprites.get(key);
+    if (!spr) {
+      if (zSprites.size > 200) zSprites.clear();
+      spr = document.createElement("canvas");
+      spr.width = Math.ceil(1.0 * s * L.dpr); spr.height = Math.ceil(1.25 * s * L.dpr);
+      const c = spr.getContext("2d"), lw = Math.max(0.02, 1 / s);
+      c.setTransform(s * L.dpr, 0, 0, s * L.dpr, 0.45 * s * L.dpr, 1.19 * s * L.dpr);
+      if (arms) zArm(c, -0.02, -0.7, -0.06, ZC.skinDark, lw, ZLINE);
+      zBody(c, s, walkStep * Math.PI / 4, dizzy, open, 0);
+      if (arms) zArm(c, 0.05, -0.66, 0.04, ZC.skin, lw, ZLINE);
+      zSprites.set(key, spr);
+    }
+    return spr;
+  }
+  function drawZombie(c, x, y, s, o) {
+    o = o || {};
+    const lw = Math.max(0.02, 1 / s);
+    c.save();
+    c.translate(x, y - (o.lift || 0));
+    c.scale((o.f || 1) * s, s);
+    const k = o.fall || 0;
+    if (k) { const sc = 1 - LIE_SHRINK * k; c.scale(sc, sc); c.translate(0.55 * k, -0.12 * k); c.rotate(-Math.PI / 2 * k); }
+    if (o.tilt) c.rotate(o.tilt);
+    const baked = o.armF === undefined && o.armB === undefined && !o.vector;
+    if (!baked) zArm(c, -0.02, -0.7, o.armB !== undefined ? o.armB : -0.06, ZC.skinDark, lw, ZLINE);
+    if (o.vector) zBody(c, s, o.walk || 0, o.dizzy, o.open, o.seed || 0);
+    else c.drawImage(zBodySprite(s, Math.round((o.walk || 0) / (Math.PI / 4)) & 7, o.dizzy, o.open, baked), -0.45, -1.19, 1.0, 1.25);
+    if (!baked) zArm(c, 0.05, -0.66, o.armF !== undefined ? o.armF : 0.04, ZC.skin, lw, ZLINE);
+    c.restore();
+  }
+  function zBody(c, s, walk, dizzy, open, seed) {
+    const line = ZLINE, lw = Math.max(0.02, 1 / s), t = S.time;
+    const lg = Math.sin(walk) * 0.05;
+    // legs: ragged trousers and big shoes
+    poly(c, [-0.13 + lg, -0.4, -0.02 + lg, -0.4, -0.02 + lg, -0.07, -0.05 + lg, -0.1, -0.08 + lg, -0.06, -0.13 + lg, -0.09]); paint(c, ZC.pantsDark, line, lw);
+    ell(c, -0.06 + lg, -0.035, 0.085, 0.04); paint(c, ZC.shoe, line, lw);
+    poly(c, [0.02 - lg, -0.4, 0.13 - lg, -0.4, 0.13 - lg, -0.08, 0.1 - lg, -0.06, 0.07 - lg, -0.1, 0.02 - lg, -0.07]); paint(c, ZC.pants, line, lw);
+    ell(c, 0.1 - lg, -0.035, 0.09, 0.04); paint(c, ZC.shoe, line, lw);
+    // tattered shirt with a patch and a tear
+    poly(c, [-0.2, -0.79, 0.2, -0.79, 0.22, -0.36, 0.13, -0.3, 0.07, -0.38, -0.01, -0.28, -0.09, -0.37, -0.15, -0.3, -0.22, -0.34]);
+    paint(c, ZC.shirt, line, lw);
+    rrect(c, -0.12, -0.63, 0.1, 0.08, 0.015); paint(c, ZC.shirtDark);
+    c.strokeStyle = "#c9a77e"; c.lineWidth = lw;
+    c.beginPath(); for (let i = 0; i < 4; i++) { c.moveTo(-0.11 + i * 0.027, -0.64); c.lineTo(-0.11 + i * 0.027, -0.62); } c.stroke();
+    poly(c, [0.08, -0.55, 0.14, -0.52, 0.1, -0.47]); paint(c, ZC.skinDark);
+    // head
+    ell(c, 0.04, -0.94, 0.17, 0.165); paint(c, ZC.skin, line, lw);
+    circ(c, -0.11, -0.93, 0.04); paint(c, ZC.skinDark, line, lw); // ear
+    poly(c, [-0.15, -1.0, -0.1, -1.12, -0.04, -1.05, 0.0, -1.15, 0.05, -1.06, 0.12, -1.13, 0.14, -1.03, 0.2, -1.0, 0.12, -1.04, 0.0, -1.05]);
+    paint(c, ZC.hair, line, lw);
+    if (dizzy) {
+      c.strokeStyle = "#2d4a22"; c.lineWidth = Math.max(0.02, 1.4 / s);
+      c.beginPath(); c.arc(0.08, -0.95, 0.035, Math.PI * 1.1, Math.PI * 1.9); c.moveTo(0.2, -0.93); c.arc(0.17, -0.93, 0.03, Math.PI * 1.1, Math.PI * 1.9); c.stroke();
+    } else {
+      circ(c, 0.08, -0.96, 0.058); paint(c, "#ffffff", line, lw);
+      circ(c, 0.175, -0.935, 0.044); paint(c, "#ffffff", line, lw);
+      circ(c, 0.095, -0.955, 0.022); paint(c, "#c0392b");
+      circ(c, 0.188, -0.93, 0.018); paint(c, "#c0392b");
+    }
+    if (open) {
+      ell(c, 0.12, -0.845, 0.055, 0.04); paint(c, "#2d4a22");
+      ell(c, 0.12, -0.83, 0.03, 0.015); paint(c, "#e57373");
+    } else {
+      c.beginPath(); c.moveTo(0.04, -0.86); c.quadraticCurveTo(0.11, -0.82 + Math.sin(t / 400 + seed) * 0.01, 0.19, -0.86);
+      c.strokeStyle = "#2d4a22"; c.lineWidth = Math.max(0.025, 1.2 / s); c.stroke();
+      rrect(c, 0.1, -0.85, 0.035, 0.035, 0.008); paint(c, "#ffffff");
+    }
+  }
+
+  // ---------- obstacles (anchored at the square's centre, size = tile width T) ----------
+  function drawRock(c, x, y, T, v) {
+    const k = 0.9 + v * 0.25, line = "rgba(60,64,70,0.45)", lw = Math.max(1, T * 0.025);
+    ell(c, x - 0.02 * T, y - 0.2 * T * k, 0.36 * T * k, 0.27 * T * k); paint(c, "#9aa1a8", line, lw);
+    ell(c, x - 0.09 * T, y - 0.3 * T * k, 0.17 * T * k, 0.1 * T * k, -0.3); paint(c, "#bfc5cb");
+    ell(c, x + 0.26 * T, y - 0.07 * T, 0.13 * T, 0.09 * T); paint(c, "#8a9198", line, lw);
+    if (v > 0.5) { ell(c, x + 0.06 * T, y - 0.42 * T * k, 0.12 * T, 0.045 * T); paint(c, "#8fbf6a"); }
+    c.strokeStyle = "rgba(70,74,80,0.5)"; c.lineWidth = lw;
+    c.beginPath(); c.moveTo(x + 0.08 * T, y - 0.34 * T * k); c.lineTo(x + 0.13 * T, y - 0.22 * T * k); c.lineTo(x + 0.09 * T, y - 0.13 * T * k); c.stroke();
+  }
+  function drawBush(c, x, y, T, v) {
+    const k = 0.92 + v * 0.18, line = "rgba(40,80,30,0.45)", lw = Math.max(1, T * 0.025);
+    blobs(c, [[x - 0.17 * T * k, y - 0.2 * T * k, 0.2 * T * k], [x + 0.17 * T * k, y - 0.2 * T * k, 0.2 * T * k], [x, y - 0.36 * T * k, 0.23 * T * k]]);
+    c.strokeStyle = line; c.lineWidth = lw * 2; c.stroke(); c.fillStyle = "#5a9e3c"; c.fill();
+    circ(c, x - 0.07 * T, y - 0.43 * T * k, 0.09 * T); paint(c, "#73b853");
+    circ(c, x + 0.17 * T, y - 0.27 * T * k, 0.06 * T); paint(c, "#73b853");
+    if (v < 0.6) {
+      for (const [dx, dy] of [[-0.18, -0.22], [0.08, -0.3], [0.2, -0.14]]) { circ(c, x + dx * T, y + dy * T * k, 0.035 * T); paint(c, "#e2475b"); }
+    }
+  }
+  function drawTree(c, x, y, T, v) {
+    const k = 0.92 + v * 0.16, line = "rgba(40,70,30,0.45)", lw = Math.max(1, T * 0.025);
+    rrect(c, x - 0.07 * T, y - 0.6 * T * k, 0.14 * T, 0.6 * T * k, 0.04 * T); paint(c, "#8b5a2b", "rgba(70,40,20,0.5)", lw);
+    blobs(c, [[x - 0.2 * T, y - 0.68 * T * k, 0.25 * T], [x + 0.2 * T, y - 0.7 * T * k, 0.25 * T], [x, y - 0.95 * T * k, 0.3 * T]]);
+    c.strokeStyle = line; c.lineWidth = lw * 2; c.stroke(); c.fillStyle = "#3f8f3a"; c.fill();
+    circ(c, x - 0.08 * T, y - 1.03 * T * k, 0.14 * T); paint(c, "#56a84b");
+    circ(c, x + 0.2 * T, y - 0.78 * T * k, 0.1 * T); paint(c, "#56a84b");
+    if (v > 0.45) {
+      for (const [dx, dy] of [[-0.22, -0.7], [0.12, -0.92], [0.24, -0.62]]) { circ(c, x + dx * T, y + dy * T * k, 0.045 * T); paint(c, "#e74c3c"); }
+    }
+  }
+  const OBSTACLE_DRAW = { rock: drawRock, bush: drawBush, tree: drawTree };
+
+  // ---------- the static board: backdrop, grassy diamond with earth edges, the hole ----------
+  function drawBackdrop(c) {
+    const gr = c.createLinearGradient(0, 0, L.w, L.h);
+    gr.addColorStop(0, "#fef9f0"); gr.addColorStop(1, "#fdf2e3");
+    c.fillStyle = gr; c.fillRect(0, 0, L.w, L.h);
+  }
+  function drawHole(c, x, y, T) {
+    ell(c, x, y, 0.47 * T, 0.25 * T); paint(c, "#8b6b47", "rgba(80,55,30,0.5)", Math.max(1, T * 0.025));
+    ell(c, x, y - 0.03 * T, 0.38 * T, 0.18 * T); paint(c, "#a5825a");
+    ell(c, x, y + 0.01 * T, 0.31 * T, 0.15 * T); paint(c, "#2b1d12");
+    for (const [dx, dy] of [[-0.42, 0.12], [0.4, 0.1], [0.3, 0.2]]) { circ(c, x + dx * T, y + dy * T, 0.035 * T); paint(c, "#7a5a3a"); }
+  }
+  function buildGround() {
+    groundCv.width = canvas.width; groundCv.height = canvas.height;
+    const c = gg, T = L.T, D = 0.42 * T;
+    c.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+    drawBackdrop(c);
+    const top = { x: L.ox, y: L.oy }, right = { x: L.ox + 6 * T, y: L.oy + 3 * T };
+    const bottom = { x: L.ox, y: L.oy + 6 * T }, left = { x: L.ox - 6 * T, y: L.oy + 3 * T };
+    // soft shadow under the island
+    ell(c, L.ox, bottom.y - 1.6 * T + D, 6.2 * T, 2.2 * T); paint(c, "rgba(120,90,50,0.10)");
+    // earth sides
+    poly(c, [left.x, left.y, bottom.x, bottom.y, bottom.x, bottom.y + D, left.x, left.y + D]); paint(c, "#a8794e");
+    poly(c, [bottom.x, bottom.y, right.x, right.y, right.x, right.y + D, bottom.x, bottom.y + D]); paint(c, "#8d6240");
+    for (let i = 0; i < 26; i++) { // pebbles in the earth
+      const u = hash(i, 3), d = 0.35 + hash(i, 4) * 0.5, onLeft = i % 2 === 0;
+      const a = onLeft ? left : bottom, b = onLeft ? bottom : right;
+      ell(c, lerp(a.x, b.x, u), lerp(a.y, b.y, u) + d * D, 0.07 * T, 0.035 * T); paint(c, onLeft ? "#93673f" : "#7a5434");
+    }
+    // grass top
+    const gr = c.createLinearGradient(0, top.y, 0, bottom.y);
+    gr.addColorStop(0, "#b8e294"); gr.addColorStop(1, "#98cc70");
+    poly(c, [top.x, top.y, right.x, right.y, bottom.x, bottom.y, left.x, left.y]); paint(c, gr);
+    c.save();
+    poly(c, [top.x, top.y, right.x, right.y, bottom.x, bottom.y, left.x, left.y]); c.clip();
+    const hole = S.board.hole;
+    for (let i = 0; i < 9; i++) { // light patches, not aligned to squares
+      const p = P(hash(i, 7) * 12 - 0.5, hash(i, 8) * 12 - 0.5);
+      ell(c, p.x, p.y, (0.9 + hash(i, 9)) * T, (0.45 + hash(i, 9) * 0.5) * T); paint(c, "rgba(255,255,220,0.18)");
+    }
+    c.strokeStyle = "#7fb55a"; c.lineWidth = Math.max(1, T * 0.035); c.lineCap = "round";
+    for (let i = 0; i < 90; i++) { // grass tufts
+      const cc = hash(i, 1) * 12 - 0.5, rr = hash(i, 2) * 12 - 0.5;
+      if (Math.abs(cc - hole.c) < 0.8 && Math.abs(rr - hole.r) < 0.8) continue;
+      const p = P(cc, rr), h = T * 0.09;
+      c.beginPath(); c.moveTo(p.x - h * 0.6, p.y - h); c.lineTo(p.x, p.y); c.lineTo(p.x + h * 0.6, p.y - h); c.moveTo(p.x, p.y); c.lineTo(p.x, p.y - h * 1.2); c.stroke();
+    }
+    const petals = ["#ffffff", "#ffe066", "#ffb3c7"];
+    for (let i = 0; i < 18; i++) { // tiny flowers
+      const cc = hash(i, 5) * 12 - 0.5, rr = hash(i, 6) * 12 - 0.5;
+      if (Math.abs(cc - hole.c) < 0.9 && Math.abs(rr - hole.r) < 0.9) continue;
+      const p = P(cc, rr), f = T * 0.045;
+      c.fillStyle = petals[i % 3];
+      for (let j = 0; j < 5; j++) { const a = j * TAU / 5; circ(c, p.x + Math.cos(a) * f, p.y + Math.sin(a) * f * 0.6, f * 0.7); c.fill(); }
+      circ(c, p.x, p.y, f * 0.6); paint(c, "#f5a623");
+    }
+    c.restore();
+    // grassy lip along the front edges
+    c.fillStyle = "#86bf5e";
+    for (const [a, b] of [[left, bottom], [bottom, right]]) {
+      for (let i = 0; i <= 24; i++) { const u = i / 24; ell(c, lerp(a.x, b.x, u), lerp(a.y, b.y, u) + 0.04 * T, 0.16 * T, 0.09 * T); c.fill(); }
+    }
+    c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = Math.max(1, T * 0.03);
+    c.beginPath(); c.moveTo(left.x, left.y); c.lineTo(top.x, top.y); c.lineTo(right.x, right.y); c.stroke();
+    if (hole.c >= 0) { const hp = P(hole.c, hole.r); drawHole(c, hp.x, hp.y, T); }
+    // obstacles never move: their flat shadows go into the ground, and each one gets its own sprite
+    c.fillStyle = "rgba(40,60,20,0.2)";
+    for (const o of obstacles) { const p = P(o.c, o.r); ell(c, p.x, p.y + 0.02 * T, 0.4 * T, 0.14 * T); c.fill(); }
+    for (const o of obstacles) buildObstacleSprite(o);
+  }
+  // A sprite covers the obstacle's box (-0.55..0.55 T wide, -1.45..0.15 T tall around the square's centre) and is
+  // placed on whole device pixels with the sub-pixel offset drawn into it, so it looks exactly like drawing it directly.
+  function buildObstacleSprite(o) {
+    const T = L.T, d = L.dpr, p = P(o.c, o.r);
+    const x0 = Math.floor((p.x - 0.55 * T) * d), y0 = Math.floor((p.y - 1.45 * T) * d);
+    const w = Math.ceil(1.1 * T * d) + 2, h = Math.ceil(1.6 * T * d) + 2;
+    const spr = o.spr || (o.spr = document.createElement("canvas"));
+    spr.width = w; spr.height = h;
+    const c = spr.getContext("2d");
+    c.setTransform(d, 0, 0, d, -x0, -y0);
+    OBSTACLE_DRAW[o.kind](c, p.x, p.y, T, o.v);
+    o.sx = x0 / d; o.sy = y0 / d; o.sw = w / d; o.sh = h / d;
+  }
+  function ensureGround() {
+    if (groundBoard !== S.board) {
+      groundBoard = S.board; groundKey = "";
+      obstacles = [];
+      for (const [k, kind] of S.board.obstacles) {
+        const [c, r] = k.split(",").map(Number);
+        const o = { c, r, kind, v: hash(c + 0.5, r + 0.25), spr: null, sx: 0, sy: 0, sw: 0, sh: 0 };
+        o.item = { d: c + r, x: c - r, kind, o }; // its (static) entry in the depth-sorted draw list
+        obstacles.push(o);
+      }
+    }
+    if (groundKey !== L.key) { buildGround(); groundKey = L.key; }
+  }
+
+  // ---------- poses ----------
+  function screenX(c, r) { return c - r; }
+  function bunnyPose() {
+    const b = S.bunny, T = L.T;
+    const t = clamp01((S.time - b.hopStart) / TM.hopMs);
+    const o = { c: lerp(b.fromC, b.c, t), r: lerp(b.fromR, b.r, t), lift: Math.sin(Math.PI * t) * 0.4 * T, kick: 0, f: anim.bunnyF };
+    if (S.phase === "kick" && anim.kick) {
+      const kt = S.time - anim.kick.t0, z = S.zombies[anim.kick.id];
+      if (z) { const dx = screenX(z.c, z.r) - screenX(b.c, b.r); if (dx) o.f = dx > 0 ? 1 : -1; }
+      const up = kt < 260 ? ease(kt / 260) : kt < 1000 ? 1 : 1 - ease(clamp01((kt - 1000) / 300));
+      o.lift = up * 0.85 * T + (kt > 260 && kt < 1000 ? Math.sin(kt / 70) * 0.04 * T : 0);
+      o.kick = kt < 520 ? 0 : kt < 700 ? ease((kt - 520) / 180) : kt < 1050 ? 1 - 0.4 * clamp01((kt - 700) / 350) : 0;
+    }
+    return o;
+  }
+  function zombiePose(z) {
+    const t = S.time, T = L.T;
+    const st = clamp01((t - z.stepStart) / 520);
+    const e = ease(st), moving = st < 1;
+    const o = { c: lerp(z.fromC, z.c, e), r: lerp(z.fromR, z.r, e), lift: 0, seed: z.id * 1.7 };
+    let f = anim.faceZ.get(z.id) || 1;
+    const dx = screenX(S.bunny.c, S.bunny.r) - screenX(z.c, z.r);
+    if (dx) f = dx > 0 ? 1 : -1;
+    o.f = f;
+    o.tilt = moving ? Math.sin(st * TAU) * 0.12 : Math.sin(t / 380 + o.seed) * 0.05;
+    o.walk = moving ? st * TAU * 1.5 : 0;
+    o.lift = moving ? Math.abs(Math.sin(st * TAU)) * 0.05 * T : 0;
+    const victim = S.phase === "kick" && anim.kick && anim.kick.id === z.id;
+    if (victim) {
+      const kt = t - anim.kick.t0;
+      o.f = f = anim.fallF.get(z.id) || f;
+      if (kt < 900) {
+        o.armF = -0.9 + Math.sin(kt / 45) * 0.9; o.armB = -0.9 + Math.cos(kt / 50) * 0.9;
+        o.tilt = Math.sin(kt / 60) * 0.12; o.open = true;
+      }
+      if (kt >= 850) { const k = clamp01((kt - 850) / 450); o.fall = ease(k) - Math.sin(clamp01((kt - 1300) / 200) * Math.PI) * 0.06; o.tilt = 0; o.dizzy = kt > 1100; }
+      o.burst = kt >= 650 && kt < 1150 ? (kt - 650) / 500 : 0;
+    } else if (z.ko) {
+      o.f = f = anim.fallF.get(z.id) || f;
+      o.fall = 1; o.tilt = 0; o.dizzy = true; o.stars = true; o.armF = 0.2; o.armB = 0.1;
+    } else if (anim.wakeAt.has(z.id)) {
+      const wt = t - anim.wakeAt.get(z.id);
+      if (wt < 350) { o.f = f = anim.fallF.get(z.id) || f; o.fall = 1 - ease(wt / 350); o.dizzy = true; }
+      else if (wt < 1050) o.tilt = Math.sin((wt - 350) / 55) * 0.22 * (1 - (wt - 350) / 700);
+      else anim.wakeAt.delete(z.id);
+    }
+    anim.faceZ.set(z.id, f);
+    return o;
+  }
+
+  // ---------- play scene ----------
+  const drawItems = [];
+  const byDepth = (a, b) => a.d - b.d || a.x - b.x;
+  function drawPlay(bunnyOverride) {
+    const T = L.T, t = S.time;
+    ensureGround();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(groundCv, 0, 0);
+    g.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+    const hole = S.board.hole;
+    if (hole.c >= 0 && S.phase === "play") { // the hole glows softly so it is easy to find
+      const hp = P(hole.c, hole.r), a = 0.35 + 0.25 * Math.sin(t / 300);
+      ell(g, hp.x, hp.y, 0.58 * T, 0.31 * T); g.strokeStyle = "rgba(255,214,90," + a.toFixed(3) + ")"; g.lineWidth = Math.max(2, T * 0.07); g.stroke();
+    }
+    if (glowCell && S.phase === "play") { // the square a held finger would hop to
+      const gp = P(glowCell.c, glowCell.r), a = 0.34 + 0.12 * Math.sin(t / 160), hw = T * 0.46, hh = T * 0.23;
+      g.beginPath(); g.moveTo(gp.x, gp.y - hh); g.lineTo(gp.x + hw, gp.y); g.lineTo(gp.x, gp.y + hh); g.lineTo(gp.x - hw, gp.y); g.closePath();
+      g.fillStyle = "rgba(255,230,120," + a.toFixed(3) + ")"; g.fill();
+      g.strokeStyle = "rgba(255,200,70,0.8)"; g.lineWidth = Math.max(2, T * 0.05); g.stroke();
+    }
+    // Depth-sorted draw list; obstacle entries are built once per board, the array is reused frame to frame.
+    const items = drawItems;
+    items.length = 0;
+    for (const o of obstacles) items.push(o.item);
+    for (const z of S.zombies) { const o = zombiePose(z); items.push({ d: o.c + o.r + (o.fall ? 0.3 : 0), x: o.c - o.r, kind: "zombie", o }); }
+    const bp = bunnyOverride || bunnyPose();
+    if (!bp.hidden) items.push({ d: bp.c + bp.r + 0.01, x: bp.c - bp.r, kind: "bunny", o: bp });
+    items.sort(byDepth);
+    // shadows first (flat on the ground; the obstacles' shadows are already in the ground image)
+    g.fillStyle = "rgba(40,60,20,0.2)";
+    for (const it of items) {
+      if (it.kind !== "zombie" && it.kind !== "bunny") continue;
+      const p = P(it.o.c, it.o.r);
+      it.p = p;
+      if (it.kind === "zombie") { const k = it.o.fall || 0; ell(g, p.x, p.y + 0.02 * T, (0.3 + 0.35 * k) * T, 0.12 * T); g.fill(); }
+      else { const k = 1 - Math.min(0.5, it.o.lift / T * 0.5); ell(g, p.x, p.y + 0.02 * T, 0.3 * T * k * (it.o.scale || 1), 0.11 * T * k); g.fill(); }
+    }
+    const ZS = 1.35 * T, BS = 1.2 * T;
+    let bunnyAt = null, overlays = 0;
+    for (const it of items) {
+      const o = it.o;
+      if (it.kind === "zombie") {
+        drawZombie(g, it.p.x, it.p.y, ZS, o);
+        if (o.stars || o.burst) overlays++;
+      } else if (it.kind === "bunny") {
+        g.save(); g.translate(it.p.x, it.p.y); const sc = o.scale || 1; g.scale(sc, sc);
+        drawBunny(g, 0, o.sink ? o.sink * T : 0, BS, o);
+        g.restore();
+        bunnyAt = it;
+      } else {
+        g.drawImage(o.spr, o.sx, o.sy, o.sw, o.sh);
+      }
+    }
+    // the bunny shows through anything standing in front of it
+    if (bunnyAt && !bunnyAt.o.scale) { g.globalAlpha = 0.3; drawBunny(g, bunnyAt.p.x, bunnyAt.p.y, BS, bunnyAt.o); g.globalAlpha = 1; }
+    if (overlays) { // KO stars and BONK bursts go on top of everything
+      for (const it of items) {
+        if (it.kind !== "zombie") continue;
+        if (it.o.stars) koStars(it.p, it.o);
+        if (it.o.burst) bonk(it.p, it.o);
+      }
+    }
+    if (bunnyAt && t < S.bunny.invincibleUntil && S.phase === "play") { // sparkly "can't be caught" time
+      const p = bunnyAt.p, o = bunnyAt.o;
+      for (let i = 0; i < 5; i++) {
+        const a = t / 260 + i * TAU / 5;
+        twinkle(g, p.x + Math.cos(a) * 0.45 * T, p.y - o.lift - 0.55 * T + Math.sin(a) * 0.3 * T, 0.11 * T * (0.7 + 0.4 * Math.sin(t / 90 + i)));
+      }
+    }
+  }
+  function headPoint(p, o, s) { // the zombie's head in screen px, for lying or standing poses
+    const k = o.fall || 0, f = o.f || 1;
+    s *= 1 - LIE_SHRINK * k;
+    return { x: p.x + f * s * (0.55 * k - 0.95 * Math.sin(Math.PI / 2 * k)), y: p.y - o.lift - s * (0.12 * k + 0.95 * Math.cos(Math.PI / 2 * k)) };
+  }
+  function koStars(p, o) {
+    const T = L.T, h = headPoint(p, o, 1.35 * T), t = S.time;
+    for (let i = 0; i < 3; i++) {
+      const a = t / 260 + i * TAU / 3;
+      star(g, h.x + Math.cos(a) * 0.32 * T, h.y - 0.28 * T + Math.sin(a) * 0.1 * T, 0.1 * T, a, "#ffd23f", "#d99a00");
+    }
+  }
+  let bodyFont = ""; // read once, the first time a BONK is drawn
+  function bonk(p, o) {
+    const T = L.T, h = headPoint(p, { fall: 0, f: o.f, lift: 0 }, 1.35 * T), k = o.burst;
+    const r = T * (0.25 + 0.2 * Math.sin(Math.min(1, k * 2) * Math.PI / 2));
+    g.globalAlpha = k > 0.75 ? (1 - k) * 4 : 1;
+    star(g, h.x, h.y - 0.1 * T, r, 0.2, "#ffe066", "#ff7b54");
+    if (!bodyFont) bodyFont = getComputedStyle(document.body).fontFamily;
+    g.fillStyle = "#e8553a"; g.font = "bold " + Math.round(r * 0.5) + "px " + bodyFont;
+    g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("BONK!", h.x, h.y - 0.1 * T);
+    g.globalAlpha = 1;
+  }
+
+  // ---------- burrow dinner (virtual 400 x 260 scene, scaled to fit) ----------
+  function fitScene(vw, vh) {
+    const k = Math.min(L.w / vw, L.h / vh);
+    return { k, x: (L.w - vw * k) / 2, y: (L.h - vh * k) / 2 };
+  }
+  function drawBurrow(e) {
+    const t = S.time, F = fitScene(400, 260);
+    g.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+    // full-bleed: sky above the grass line, dirt below
+    const grassY = F.y + 40 * F.k;
+    let gr = g.createLinearGradient(0, 0, 0, grassY);
+    gr.addColorStop(0, "#bfe6ff"); gr.addColorStop(1, "#e9f7ff");
+    g.fillStyle = gr; g.fillRect(0, 0, L.w, grassY);
+    g.fillStyle = "#6b4a2f"; g.fillRect(0, grassY, L.w, L.h - grassY);
+    g.fillStyle = "#7cc05a"; g.fillRect(0, grassY - 2, L.w, 12 * F.k);
+    g.fillStyle = "#5e4029";
+    for (let i = 0; i < 60; i++) { ell(g, hash(i, 11) * L.w, grassY + 14 * F.k + hash(i, 12) * (L.h - grassY), 5 * F.k, 3 * F.k); g.fill(); }
+    g.translate(F.x, F.y); g.scale(F.k, F.k);
+    // sun and a flower on the surface, the hole entrance and the tunnel down to the door
+    circ(g, 350, 16, 11); paint(g, "#ffe27a");
+    ell(g, 60, 45, 18, 5); paint(g, "#2b1d12");
+    g.strokeStyle = "#4e3420"; g.lineWidth = 20; g.lineCap = "round";
+    g.beginPath(); g.moveTo(60, 50); g.quadraticCurveTo(30, 130, 60, 180); g.stroke();
+    // the chamber
+    rrect(g, 30, 78, 360, 172, 50);
+    gr = g.createRadialGradient(215, 110, 10, 215, 150, 230);
+    gr.addColorStop(0, "#f0d3a6"); gr.addColorStop(1, "#b98a5c");
+    paint(g, gr, "#4e3420", 4);
+    g.save(); rrect(g, 30, 78, 360, 172, 50); g.clip();
+    g.fillStyle = "#a9794d"; g.fillRect(30, 236, 360, 20); // floor
+    g.strokeStyle = "#7a5230"; g.lineCap = "round";
+    for (const [x, len, bend] of [[80, 26, 6], [120, 16, -4], [165, 34, 5], [270, 22, -6], [305, 30, 4], [350, 18, -3]]) { // roots
+      g.lineWidth = 3; g.beginPath(); g.moveTo(x, 74); g.quadraticCurveTo(x + bend, 74 + len * 0.6, x - bend * 0.5, 74 + len); g.stroke();
+      g.lineWidth = 1.5; g.beginPath(); g.moveTo(x + bend * 0.4, 74 + len * 0.45); g.lineTo(x + bend * 1.4 + 4, 74 + len * 0.7); g.stroke();
+    }
+    g.restore();
+    // round door (open) on the left
+    circ(g, 72, 200, 33); paint(g, "#5d3a1a");
+    circ(g, 72, 200, 28); paint(g, "#2e2014");
+    ell(g, 41, 200, 9, 30); paint(g, "#8d5a2b", "#5d3a1a", 2);
+    circ(g, 45, 202, 2.5); paint(g, "#f2c14e");
+    // picture of a carrot on the wall
+    rrect(g, 118, 112, 38, 30, 4); paint(g, "#8d5a2b");
+    rrect(g, 122, 116, 30, 22, 2); paint(g, "#cfeeff");
+    poly(g, [130, 120, 146, 127, 130, 134]); paint(g, "#f28c28");
+    poly(g, [130, 127, 124, 121, 126, 127, 124, 133]); paint(g, "#5cb85c");
+    // rug
+    ell(g, 250, 246, 105, 8); paint(g, "#d9534f");
+    ell(g, 250, 246, 85, 5); paint(g, "#f0ad4e");
+    // lantern with a warm, flickering glow
+    const glow = 0.42 + 0.06 * Math.sin(t / 130) + 0.03 * Math.sin(t / 47);
+    gr = g.createRadialGradient(215, 104, 4, 215, 104, 120);
+    gr.addColorStop(0, "rgba(255,220,130," + glow.toFixed(3) + ")"); gr.addColorStop(1, "rgba(255,220,130,0)");
+    g.fillStyle = gr; g.fillRect(95, 78, 240, 172);
+    g.strokeStyle = "#4a3a2a"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(215, 78); g.lineTo(215, 92); g.stroke();
+    rrect(g, 207, 92, 16, 22, 4); paint(g, "#ffd56b", "#5d4037", 2);
+    circ(g, 215, 104, 3.5); paint(g, "#fff3c0");
+    // chairs behind the table
+    for (const x of [195, 232, 266, 298]) { rrect(g, x - 13, 160, 26, 44, 8); paint(g, "#9c6b3e", "#6e4826", 1.5); }
+    // the family, sitting behind the table, munching
+    const fam = [
+      { x: 195, y: 214, s: 72, col: DAD, f: 1, tie: true },
+      { x: 232, y: 214, s: 66, col: MOM, f: -1, bow: true },
+      { x: 266, y: 202, s: 50, col: BABY, f: 1 },
+      { x: 298, y: 202, s: 48, col: BABY, f: -1 }
+    ];
+    fam.forEach((m, i) => drawBunny(g, m.x, m.y - Math.abs(Math.sin(t / 220 + i)) * 2, m.s, { col: m.col, f: m.f, tie: m.tie, bow: m.bow, munch: true, happy: i >= 2 && (t / 900 + i) % 3 < 1, seed: i * 2 }));
+    // table with a gingham cloth, carrots, lettuce and a pie
+    g.fillStyle = "#8d5a2b"; g.fillRect(180, 206, 6, 42); g.fillRect(312, 206, 6, 42);
+    rrect(g, 164, 196, 168, 9, 3); paint(g, "#a0683a");
+    g.save(); poly(g, [166, 200, 330, 200, 330, 216, 320, 220, 310, 216, 300, 220, 290, 216, 280, 220, 270, 216, 260, 220, 250, 216, 240, 220, 230, 216, 220, 220, 210, 216, 200, 220, 190, 216, 180, 220, 166, 216]); g.clip();
+    g.fillStyle = "#ffffff"; g.fillRect(160, 196, 180, 30);
+    g.fillStyle = "rgba(229,115,115,0.55)";
+    for (let x = 166; x < 332; x += 12) g.fillRect(x, 196, 6, 30);
+    for (let y = 200; y < 224; y += 8) g.fillRect(160, y, 180, 4);
+    g.restore();
+    ell(g, 205, 196, 14, 3.5); paint(g, "#fafafa", "#d0d0d0", 1);
+    for (const [dx, a] of [[-6, -0.2], [0, 0.1], [6, -0.05]]) { g.save(); g.translate(205 + dx, 192); g.rotate(a); poly(g, [-7, -2, 8, 0, -7, 2.5]); paint(g, "#f28c28"); poly(g, [-7, 0, -11, -3, -10, 0, -11, 3]); paint(g, "#5cb85c"); g.restore(); }
+    g.beginPath(); g.arc(244, 191, 12, 0, Math.PI); g.closePath(); paint(g, "#4ecdc4", "#2fa59d", 1);
+    for (const [dx, r] of [[-6, 6], [0, 7], [6, 6]]) { circ(g, 244 + dx, 189, r); paint(g, "#7bc043"); }
+    circ(g, 243, 186, 3); paint(g, "#a5d86a");
+    g.beginPath(); g.ellipse(281, 194, 16, 9, 0, Math.PI, 0); g.closePath(); paint(g, "#d9a05b", "#b07a3a", 1);
+    g.strokeStyle = "#b07a3a"; g.lineWidth = 1; g.beginPath(); for (const x of [273, 281, 289]) { g.moveTo(x, 194); g.lineTo(x + 2, 186); } g.stroke();
+    g.fillStyle = "#c9c9c9"; g.fillRect(264, 194, 34, 2);
+    g.strokeStyle = "rgba(255,255,255,0.7)"; g.lineWidth = 1.5;
+    for (let i = 0; i < 3; i++) { const y0 = 180 - ((t / 30 + i * 9) % 22); g.beginPath(); g.moveTo(275 + i * 6, y0 + 6); g.quadraticCurveTo(279 + i * 6, y0 + 3, 275 + i * 6, y0); g.stroke(); }
+    ell(g, 314, 196, 11, 3); paint(g, "#fafafa", "#d0d0d0", 1);
+    // our bunny's stool at the end of the table
+    g.fillStyle = "#8d5a2b"; g.fillRect(342, 228, 4, 20); g.fillRect(360, 228, 4, 20);
+    ell(g, 353, 228, 17, 4.5); paint(g, "#a0683a", "#6e4826", 1);
+    // our bunny hops in from the door and sits down
+    let bx, by, lift = 0, f = 1, seated = false;
+    const hopEnd = 3400, sitEnd = 3800;
+    if (e < 900) { bx = 70; by = 246; f = 1; }
+    else if (e < hopEnd) {
+      const u = (e - 900) / (hopEnd - 900), hops = 6, ph = u * hops;
+      bx = lerp(78, 330, u); by = 246; lift = Math.sin((ph % 1) * Math.PI) * 16;
+    } else if (e < sitEnd) {
+      const u = (e - hopEnd) / (sitEnd - hopEnd);
+      bx = lerp(330, 353, u); by = lerp(246, 226, u); lift = Math.sin(u * Math.PI) * 22;
+    } else { bx = 353; by = 226; f = -1; seated = true; }
+    drawBunny(g, bx, by, 58, { f, lift, munch: seated, carrot: seated, happy: seated && (t / 700) % 4 < 1 });
+    if (seated) { // little hearts float up
+      for (let i = 0; i < 3; i++) {
+        const u = ((e - sitEnd) / 1600 + i / 3) % 1, hx = 240 + i * 50 + Math.sin(u * 6 + i) * 6, hy = 150 - u * 60;
+        g.globalAlpha = 1 - u; heart(g, hx, hy, 6); g.globalAlpha = 1;
+      }
+    }
+  }
+  function heart(c, x, y, r) {
+    c.beginPath(); c.moveTo(x, y + r * 0.9);
+    c.bezierCurveTo(x - r * 1.6, y - r * 0.2, x - r * 0.6, y - r * 1.4, x, y - r * 0.4);
+    c.bezierCurveTo(x + r * 0.6, y - r * 1.4, x + r * 1.6, y - r * 0.2, x, y + r * 0.9);
+    paint(c, "#ff6f91");
+  }
+
+  // ---------- dance finale ----------
+  const CONFETTI = ["#ff7b54", "#4ecdc4", "#7bc043", "#ffd23f", "#ff6fa5", "#8e7cf0"];
+  function confetti(e) {
+    const w = L.w, h = L.h, t = e / 1000;
+    for (let i = 0; i < 80; i++) {
+      const sp = 40 + hash(i, 21) * 70, x = hash(i, 22) * w + Math.sin(t * 2 + i) * 14;
+      const y = ((hash(i, 23) * (h + 40) + t * sp) % (h + 40)) - 20, a = t * (2 + hash(i, 24) * 4) + i;
+      const k = Math.cos(a * 1.3), ca = Math.cos(a) * L.dpr, sa = Math.sin(a) * L.dpr;
+      g.setTransform(ca, sa, -sa * k, ca * k, x * L.dpr, y * L.dpr); // translate, rotate, flip
+      g.fillStyle = CONFETTI[i % CONFETTI.length]; g.fillRect(-4, -2.5, 8, 5);
+    }
+    g.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+  }
+  // Sky, grass and bunting don't move: drawn once per screen size.
+  const partyCv = document.createElement("canvas");
+  let partyKey = "";
+  function buildParty() {
+    const w = L.w, h = L.h, c = partyCv.getContext("2d");
+    partyCv.width = canvas.width; partyCv.height = canvas.height;
+    c.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+    let gr = c.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, "#ffd9ec"); gr.addColorStop(0.45, "#fff1c9"); gr.addColorStop(1, "#fff1c9");
+    c.fillStyle = gr; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 3; i++) { // party spotlights from the top
+      const a = Math.PI / 2 + (i - 1) * 0.5, cx = w * (0.2 + i * 0.3);
+      c.beginPath(); c.moveTo(cx, -10);
+      c.lineTo(cx + Math.cos(a - 0.18) * h * 1.4, -10 + Math.sin(a - 0.18) * h * 1.4);
+      c.lineTo(cx + Math.cos(a + 0.18) * h * 1.4, -10 + Math.sin(a + 0.18) * h * 1.4);
+      c.closePath(); c.fillStyle = ["rgba(78,205,196,0.16)", "rgba(255,123,84,0.14)", "rgba(142,124,240,0.14)"][i]; c.fill();
+    }
+    const gy = h * 0.42;
+    gr = c.createLinearGradient(0, gy, 0, h);
+    gr.addColorStop(0, "#a8dc84"); gr.addColorStop(1, "#86c262");
+    c.beginPath(); c.moveTo(0, gy + 10); c.quadraticCurveTo(w / 2, gy - 14, w, gy + 10); c.lineTo(w, h); c.lineTo(0, h); c.closePath(); paint(c, gr);
+    const by = Math.max(10, h * 0.05);
+    c.strokeStyle = "#9c6b3e"; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(0, by); c.quadraticCurveTo(w / 2, by + h * 0.07, w, by); c.stroke();
+    const flags = Math.max(6, Math.round(w / 34)), fs = Math.min(14, w / flags * 0.45);
+    for (let i = 0; i < flags; i++) {
+      const u = (i + 0.5) / flags, x = u * w, y = by + 2 * u * (1 - u) * h * 0.07; // on the string's curve
+      poly(c, [x - fs, y, x + fs, y, x, y + fs * 1.6]); paint(c, CONFETTI[i % CONFETTI.length]);
+    }
+    partyKey = L.key;
+  }
+  function drawFinale(e) {
+    const w = L.w, h = L.h, beat = e / 500; // 120 beats a minute
+    if (partyKey !== L.key) buildParty();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(partyCv, 0, 0);
+    g.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+    const gy = h * 0.42;
+    // zombies in staggered rows, dancing on the beat
+    const zs = S.zombies, n = Math.max(1, zs.length);
+    const bandTop = gy - h * 0.01, bandBot = h * 0.68, areaW = w - 24, areaH = bandBot - bandTop;
+    const cols = Math.max(1, Math.min(n, Math.round(Math.sqrt(n * areaW / Math.max(areaH, 1)))));
+    const rows = Math.ceil(n / cols), cw = areaW / cols;
+    const s = Math.min(cw / 0.75, (bandTop - h * 0.1) / 1.2, h * 0.22);
+    for (let i = 0; i < n && zs.length; i++) {
+      const row = Math.floor(i / cols), inRow = Math.min(cols, n - row * cols), col = i - row * cols;
+      const x = w / 2 + (col - (inRow - 1) / 2) * cw + (row % 2 ? cw * 0.25 : -cw * 0.25) * (inRow === cols ? 1 : 0);
+      const y = rows > 1 ? bandTop + row * areaH / (rows - 1) : bandBot;
+      const ph = Math.PI * beat + i * 0.9;
+      drawZombie(g, x, y, s * (0.9 + 0.1 * row / Math.max(1, rows - 1)), {
+        f: (Math.floor(beat / 2) + i) % 2 ? 1 : -1, lift: Math.abs(Math.sin(Math.PI * beat)) * 0.1 * s,
+        tilt: Math.sin(ph) * 0.2, armF: -0.6 + Math.sin(ph * 2) * 0.5, armB: -2.2 + Math.cos(ph * 2) * 0.4,
+        walk: ph, open: i % 3 !== 0, seed: i
+      });
+    }
+    // the bunny family dances at the front
+    const sb = Math.min(s * 1.3, w / 4.8, (h - bandBot - 8) / 1.1), fy = Math.min(h - 8, bandBot + sb * 1.05);
+    const fam = [{ col: BABY, k: 0.7 }, { col: DAD, k: 1.05, tie: true }, { col: BUNNY, k: 0.95 }, { col: MOM, k: 1, bow: true }, { col: BABY, k: 0.7 }];
+    fam.forEach((m, i) => {
+      const x = w / 2 + (i - 2) * sb * 0.78, hop = Math.abs(Math.sin(Math.PI * beat + (i % 2) * Math.PI / 2));
+      drawBunny(g, x, fy, sb * m.k, { col: m.col, f: i < 2 ? 1 : i > 2 ? -1 : ((Math.floor(beat) % 2) ? 1 : -1), lift: hop * 0.35 * sb, wave: 1.15 + Math.sin(Math.PI * beat * 2 + i) * 0.35, happy: true, tie: m.tie, bow: m.bow, seed: i });
+    });
+    confetti(e);
+  }
+
+  // ---------- start screen: the bunny and a zombie waving ----------
+  const startRoom = { key: "", a: 0, b: 0 };
+  function drawStart() {
+    const w = L.w, h = L.h, t = S.time;
+    g.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+    const gr = g.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, "#dff3ff"); gr.addColorStop(1, "#fef9f0");
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    if (startRoom.key !== L.key || !(startRoom.b > startRoom.a)) { // title / button positions, re-read only on a layout change
+      startRoom.key = L.key;
+      startRoom.a = titleEl.getBoundingClientRect().bottom - L.top;
+      startRoom.b = tapEl.getBoundingClientRect().top - L.top;
+    }
+    const a = startRoom.a, b = startRoom.b;
+    const room = Math.max(40, b - a - 16), s = Math.min(room / 1.6, w * 0.3);
+    const gy = Math.min((a + b) / 2 + s * 0.55, b - 6 - s * 0.36); // feet line, island clear of the button
+    g.fillStyle = "rgba(150,110,60,0.12)"; ell(g, w / 2, gy + s * 0.12, s * 1.55, s * 0.24); g.fill();
+    ell(g, w / 2, gy, s * 1.45, s * 0.2); paint(g, "#9fd17f");
+    drawBush(g, w / 2 - s * 1.15, gy - s * 0.04, s * 0.7, 0.3);
+    drawTree(g, w / 2 + s * 1.2, gy - s * 0.04, s * 0.65, 0.8);
+    drawBunny(g, w / 2 - s * 0.5, gy, s * 0.9, { f: 1, wave: 1.15 + Math.sin(t / 180) * 0.3, lift: Math.abs(Math.sin(t / 400)) * s * 0.06 });
+    drawZombie(g, w / 2 + s * 0.5, gy, s, { f: -1, armF: 0.04, armB: -2.3 + Math.sin(t / 170) * 0.3, tilt: Math.sin(t / 500) * 0.05, open: true });
+  }
+
+  // ---------- DOM bits that follow the phase ----------
+  function show(el, on) { if (el.classList.contains("hidden") === on) el.classList.toggle("hidden", !on); }
+  function syncDom() {
+    show(startEl, S.phase === "start");
+    show(againEl, S.phase === "finale" && S.sceneEndAt !== null && S.time >= S.sceneEndAt);
+    const txt = "Board " + (S.boardIndex + 1) + " of " + BZ.ZOMBIE_COUNTS.length;
+    if (labelEl.textContent !== txt) labelEl.textContent = txt;
+    const vis = S.phase === "start" ? "hidden" : "visible";
+    if (labelEl.style.visibility !== vis) labelEl.style.visibility = vis;
+  }
+
+  function render() {
+    layout();
+    syncDom();
+    g.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+    if (S.phase === "start") drawStart();
+    else if (S.phase === "dinner") {
+      const e = S.sceneEndAt !== null ? S.time - (S.sceneEndAt - TM.dinnerMs) : TM.dinnerMs;
+      if (e < 900) { // the bunny pops down the hole, then the burrow fades in
+        const bp = bunnyPose(), u = clamp01((e - 150) / 450);
+        bp.scale = 1 - u * 0.9; bp.sink = u * 0.25; if (u >= 1) bp.hidden = true;
+        drawPlay(bp);
+      }
+      if (e >= 500) { g.globalAlpha = clamp01((e - 500) / 400); drawBurrow(e); g.globalAlpha = 1; }
+    } else if (S.phase === "finale") {
+      const e = S.sceneEndAt !== null ? S.time - (S.sceneEndAt - TM.finaleMs) : 0;
+      if (e < 900) { const bp = bunnyPose(), u = clamp01((e - 150) / 450); bp.scale = 1 - u * 0.9; bp.sink = u * 0.25; if (u >= 1) bp.hidden = true; drawPlay(bp); }
+      if (e >= 500) { g.globalAlpha = clamp01((e - 500) / 400); drawFinale(e); g.globalAlpha = 1; }
+    } else drawPlay(null);
+  }
+
+  // Animation bookkeeping from engine events.
+  BZ.on("catch", d => {
+    const z = S.zombies[d.zombieId], b = S.bunny;
+    const dx = screenX(b.c, b.r) - screenX(z.c, z.r);
+    anim.fallF.set(z.id, dx > 0 ? 1 : dx < 0 ? -1 : (anim.faceZ.get(z.id) || 1));
+    anim.kick = { id: d.zombieId, t0: S.time };
+  });
+  BZ.on("ko-wake", d => anim.wakeAt.set(d.zombieId, S.time));
+  BZ.on("hop", d => { const dx = (d.c - d.r) - (S.bunny.fromC - S.bunny.fromR); if (dx) anim.bunnyF = dx > 0 ? 1 : -1; });
+  BZ.on("victory-hop", () => { const b = S.bunny, dx = (b.c - b.r) - (b.fromC - b.fromR); if (dx) anim.bunnyF = dx > 0 ? 1 : -1; });
+  BZ.on("phase", d => {
+    if (d.phase === "play" && S.time === 0) { // a new board: forget old animations
+      anim.kick = null; anim.fallF.clear(); anim.wakeAt.clear(); anim.faceZ.clear(); anim.bunnyF = 1;
+    }
+    syncDom(); // overlays and the label follow the phase at once, not a frame later
+  });
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", layout);
+
+  return {
+    cellToScreen, screenToCell, render,
+    setGlow(cell) { glowCell = cell ? { c: cell.c, r: cell.r } : null; },
+    glowCell() { return glowCell; },
+    get tile() { layout(); return L.T; }
+  };
+})();
+
+// ===================== Input: tap / hold / keyboard (no drawing here) =====================
+// Hops only come from a press that began during "play"; every phase change forgets all presses, so a
+// finger or key still down from a scene (kick, dinner, finale, board load) must lift and press again.
+BZ.input = (function () {
+  const S = BZ.state, GAP = BZ.TIMING.minHopGapMs, COMBO_MS = 70; // COMBO_MS: lets W+D land as one diagonal
+  const boardEl = document.getElementById("board");
+  const seedParam = new URLSearchParams(location.search).get("seed");
+  const pointers = new Map(); // pointerId -> {x, y}: fingers/mouse pressed on the board during play
+  const keys = new Set();     // KeyboardEvent.code of direction keys pressed during play
+  let lastTry = -Infinity;    // S.time of the last hop attempt, so a hold retries once per hop window
+  let comboAt = null, combo = null; // engine time the first-key grace ends, and the keys pressed during it
+  const KEYDIR = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1],
+    KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
+  const NAME = { "0,-1": "up", "0,1": "down", "-1,0": "left", "1,0": "right",
+    "1,-1": "upRight", "-1,-1": "upLeft", "1,1": "downRight", "-1,1": "downLeft" };
+
+  function keyDir() { return keyDirOf(keys); }
+  function keyDirOf(set) {
+    let dx = 0, dy = 0;
+    for (const k of set) { dx += KEYDIR[k][0]; dy += KEYDIR[k][1]; }
+    return NAME[Math.sign(dx) + "," + Math.sign(dy)]; // opposite keys cancel -> undefined
+  }
+  function pointerDir(p) {
+    const b = BZ.view.cellToScreen(S.bunny.c, S.bunny.r), dx = p.x - b.x, dy = p.y - b.y;
+    if (Math.hypot(dx, dy) < BZ.view.tile * 0.3) return undefined; // on top of the bunny: nowhere to go
+    return BZ.angleToScreenDir(Math.atan2(dy, dx));
+  }
+  function lastPointer() { let p = null; for (const v of pointers.values()) p = v; return p; }
+  function attempt(dir) { lastTry = S.time; return BZ.tryHop(dir); }
+  function showGlow() {
+    const p = S.phase === "play" ? lastPointer() : null, dir = p && pointerDir(p), d = dir && BZ.SCREEN_TO_GRID[dir];
+    const c = d ? S.bunny.c + d.dc : 0, r = d ? S.bunny.r + d.dr : 0;
+    BZ.view.setGlow(d && BZ.canBunnyEnter(c, r) ? { c, r } : null);
+  }
+  function forget() {
+    pointers.clear(); keys.clear(); lastTry = -Infinity;
+    comboAt = null; combo = null;
+    BZ.view.setGlow(null);
+  }
+
+  // Called every frame: a held finger or key hops again once the hop window has passed.
+  function pump() {
+    if (S.phase !== "play") return;
+    showGlow();
+    if (comboAt !== null) { // first key press waits a moment so W+D lands as one diagonal, even for a quick tap
+      if (S.time < Math.max(comboAt, lastTry + GAP)) return;
+      const dir = keyDirOf(combo);
+      comboAt = null; combo = null;
+      if (dir) attempt(dir);
+      return;
+    }
+    if (S.time < lastTry + GAP) return;
+    const p = lastPointer(), dir = keyDir() || (p && pointerDir(p));
+    if (dir) attempt(dir);
+  }
+
+  // ---- fingers and mouse, on the board only ----
+  boardEl.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (S.phase !== "play") return;
+    try { boardEl.setPointerCapture(e.pointerId); } catch (err) { /* synthetic or finished pointer */ }
+    const p = { x: e.clientX, y: e.clientY };
+    pointers.set(e.pointerId, p);
+    const dir = pointerDir(p);
+    if (dir) attempt(dir);
+    showGlow();
+  });
+  boardEl.addEventListener("pointermove", e => {
+    const p = pointers.get(e.pointerId);
+    if (p) { p.x = e.clientX; p.y = e.clientY; showGlow(); }
+  });
+  function lift(e) { if (pointers.delete(e.pointerId)) showGlow(); }
+  boardEl.addEventListener("pointerup", lift);
+  boardEl.addEventListener("pointercancel", lift);
+  boardEl.addEventListener("lostpointercapture", lift);
+  boardEl.addEventListener("contextmenu", e => e.preventDefault());
+
+  // ---- keyboard ----
+  document.addEventListener("keydown", e => {
+    if ((e.code === "Enter" || e.code === "Space") && (S.phase === "start" || (S.phase === "finale" && !document.getElementById("play-again").classList.contains("hidden")))) {
+      e.preventDefault();
+      if (!e.repeat) { if (S.phase === "start") startPlay(); else BZ.playAgain(); }
+      return;
+    }
+    if (!KEYDIR[e.code]) return;
+    e.preventDefault();
+    if (e.repeat || keys.has(e.code) || S.phase !== "play") return; // OS key repeat is ignored; pump() repeats hops
+    keys.add(e.code);
+    if (comboAt === null) { comboAt = S.time + COMBO_MS; combo = new Set(); } // grace runs on engine time, in pump()
+    combo.add(e.code); // remembered even if the key is released before the grace ends
+  });
+  document.addEventListener("keyup", e => { keys.delete(e.code); });
+  window.addEventListener("blur", forget);
+  document.addEventListener("visibilitychange", forget);
+  BZ.on("phase", forget);
+
+  // ---- buttons and the dinner tap: one pointer path each (pointerdown then pointerup, never click) ----
+  function startPlay() { Sound.unlock(); BZ.startGame(seedParam); }
+  function tapOnce(el, fn) {
+    let down = false;
+    el.addEventListener("pointerdown", e => { down = true; e.preventDefault(); });
+    el.addEventListener("pointerup", () => { if (down) { down = false; fn(); } });
+    el.addEventListener("pointercancel", () => { down = false; });
+    el.addEventListener("pointerleave", () => { down = false; });
+  }
+  tapOnce(document.getElementById("tap-to-play"), () => { if (S.phase === "start") startPlay(); });
+  tapOnce(document.getElementById("play-again"), () => BZ.playAgain());
+
+  // A tap anywhere skips the dinner, but only a finger that went down during the dinner.
+  const dinnerDown = new Set();
+  const onToggle = e => e.target.closest && e.target.closest("#topbar");
+  document.addEventListener("pointerdown", e => { if (S.phase === "dinner" && !onToggle(e)) dinnerDown.add(e.pointerId); });
+  document.addEventListener("pointerup", e => { if (dinnerDown.delete(e.pointerId) && S.phase === "dinner") BZ.skipScene(); });
+  document.addEventListener("pointercancel", e => { dinnerDown.delete(e.pointerId); });
+  BZ.on("phase", () => dinnerDown.clear());
+
+  return { pump };
+})();
+
+// ===================== Sound director: turns engine events and simulated time into sounds and lines =====================
+(function () {
+  const LINES = ["I will eat the bunny!", "Come here, rabbit!", "I have a carrot for you, bunny!"];
+  const WELCOME = "Welcome home! You made it, " + PLAYER_NAME + "!";
+  const S = BZ.state;
+  let now = 0;                 // accumulated simulated ms (S.time restarts on every board, this does not)
+  let nextLineAt = null, nextGrowlAt = 0, nextMunchAt = 0, munchCount = 0, lastThudAt = -1e9, welcomePending = false;
+  // Private PRNG: the engine's seeded stream (zombie moves, boards) must never be touched by sound.
+  const seedQ = new URLSearchParams(location.search).get("seed");
+  const soundRng = BZ.makeRng((seedQ !== null && seedQ !== "" && !isNaN(Number(seedQ)) ? Number(seedQ) : Date.now()) ^ 0x5EED);
+  const lineGap = () => 4000 + soundRng() * 3000;
+
+  // Runs after every engine tick (the frame loop and ?manual tests both go through BZ.tick).
+  const engineTick = BZ.tick;
+  BZ.tick = function (dtMs) {
+    now += Math.min(Math.max(dtMs, 0), BZ.TIMING.maxDtMs) || 0;
+    Speech.tick(now);
+    engineTick(dtMs);
+    if (!Sound.isUnlocked()) return;
+    if (S.phase === "play") {
+      if (S.time >= BZ.TIMING.startFreezeMs && now >= nextGrowlAt) {
+        const d = BZ.nearestZombieDistance(); // Infinity when nobody is active
+        if (d <= 4) { Sound.growl(Math.max(d, 1)); nextGrowlAt = now + 500 + (Math.max(d, 1) - 1) * 450; }
+      }
+      if (nextLineAt === null) nextLineAt = now + lineGap();
+      else if (now >= nextLineAt) { Speech.say(LINES[Math.floor(soundRng() * LINES.length)], { zombie: true }); nextLineAt = now + lineGap(); }
+    } else if (S.phase === "dinner") {
+      if (welcomePending && Speech.say(WELCOME, { zombie: false })) welcomePending = false;
+      if (now >= nextMunchAt) { Sound.munch(munchCount++); nextMunchAt = now + 420; }
+    } else if (S.phase === "finale") {
+      Sound.tuneUpdate();
+    }
+  };
+
+  let prevPhase = "start";
+  BZ.on("phase", d => {
+    if (d.phase !== "kick" && !(d.phase === "play" && prevPhase === "kick")) nextLineAt = null; // a kick doesn't restart the zombie-line clock
+    prevPhase = d.phase;
+    welcomePending = d.phase === "dinner";
+    nextMunchAt = now + 600; munchCount = 0;
+    if (d.phase !== "finale") Sound.stopTune();
+  });
+  BZ.on("hop", () => Sound.boing());
+  BZ.on("victory-hop", () => Sound.boing());
+  BZ.on("blocked", () => { if (now - lastThudAt >= 600) { lastThudAt = now; Sound.thud(); } }); // held against a wall: not a machine gun
+  BZ.on("kick", () => { Sound.bonk(); Sound.groan(); });
+
+  // Sound button: one pointer path, like the other buttons.
+  const toggle = document.getElementById("sound-toggle");
+  let down = false;
+  toggle.addEventListener("pointerdown", e => { down = true; e.preventDefault(); });
+  toggle.addEventListener("pointerup", () => {
+    if (!down) return;
+    down = false;
+    const m = !Sound.isMuted();
+    Sound.setMuted(m);
+    toggle.textContent = m ? "🔇 Muted" : "🔊 Sound";
+  });
+  toggle.addEventListener("pointercancel", () => { down = false; });
+  toggle.addEventListener("pointerleave", () => { down = false; });
+})();
+
+// ===================== Frame loop =====================
+(function () {
+  let last = null;
+  function frame(now) {
+    if (last !== null && !BZ.manual) BZ.tick(now - last);
+    BZ.input.pump();
+    last = now;
+    BZ.view.render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+<a id="home-link" href="./" aria-label="Back to games">🏠</a>
+<style>
+  #home-link { position: fixed; left: calc(10px + env(safe-area-inset-left)); bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 60; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.85);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;
+    font-size: 22px; text-decoration: none; }
+</style>
+<style>
+  #home-link { left: 50%; transform: translateX(-50%); bottom: auto; top: calc(4px + env(safe-area-inset-top)); width: 40px; height: 40px; }
+</style>
+<script>
+if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js"); }); }
+</script>
+</body>
+</html>

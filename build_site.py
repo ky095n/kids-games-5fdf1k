@@ -20,7 +20,8 @@ HERE = Path(__file__).resolve().parent
 SRC = HERE.parent / "outputs"
 GAMES = [("maze_game.html", "Maze Adventure", "🦌", "Help Sven find the star"),
          ("word_game.html", "Word Builder", "🔤", "Spell the picture"),
-         ("car_game.html", "Fix the Car", "🚗", "Spot the problem, pick the part")]
+         ("car_game.html", "Fix the Car", "🚗", "Spot the problem, pick the part"),
+         ("bunny_zombie_game.html", "Bunny & Zombie", "🐰", "Hop home, kick the zombies!")]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--name", default=None, help='player name to show; "" hides it (default: keep the games\' own)')
@@ -48,7 +49,7 @@ HOME_BUTTON = """<a id="home-link" href="./" aria-label="Back to games">🏠</a>
 """
 # The car game's answer grid fills the bottom-left corner, so its Home button goes in the
 # empty middle of its top bar instead.
-HOME_AT_TOP = {"car_game.html"}
+HOME_AT_TOP = {"car_game.html", "bunny_zombie_game.html"}
 HOME_TOP_STYLE = """<style>
   #home-link { left: 50%; transform: translateX(-50%); bottom: auto; top: calc(4px + env(safe-area-inset-top)); width: 40px; height: 40px; }
 </style>
